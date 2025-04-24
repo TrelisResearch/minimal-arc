@@ -1454,4 +1454,8 @@ I want to use gemini-flash-2.0-latest-001 from open router with an open router a
 
 You should allow for concurrent requests to do the program generation, possibly some concurrency on the vetting of answers makes sense too.
 
-You'll be working inside the greenblatt folder, parallel to the arc-data-cleaned folder....
+Note that we should use mcp-run-python in order to sandbox code execution - you can find more details online, it was developed by pydantic ai.
+
+You'll be working inside the greenblatt folder, parallel to the arc-data-cleaned folder.
+
+Provide me with a detailed set of instructions, caveats and gotchas, for building this project. Do not implement the scripts but do provide detailed guidance on how to via deep research. Keep in mind as well that this project aims to be illustrative, so you should include visualisation steps at various points to help give the viewer an intuitive understanding of the approach (for example, by being able to view the input grids, ground truth output grids and grid output attempts by the llm).
