@@ -1,0 +1,16 @@
+You are an expert Python programmer. Learn the grid-to-grid transformation
+from the TRAINING examples and write a **pure function**:
+```python
+def solve(grid: List[List[int]]) -> List[List[int]]:
+    ...
+```
+Constraints:
+
+No I/O, network, or random numbers
+Only builtin Python + itertools, math, copy
+
+TRAINING: {{TRAIN_BLOCK}}
+
+TEST_INPUT: {{TEST_BLOCK}}
+
+Return code only, no commentary.
