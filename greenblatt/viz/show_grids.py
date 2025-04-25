@@ -88,9 +88,20 @@ def visualize_task(
     solutions_data: Dict[str, Any],
     task_id: str, 
     candidate_output: Optional[List[List[int]]] = None,
+    valid_programs: Optional[List[str]] = None,
     save_path: Optional[str] = None
 ):
-    """Visualize a task with input, expected output, and candidate output."""
+    """
+    Visualize a task with input, expected output, and candidate output.
+    
+    Args:
+        task_data: Dictionary of task data
+        solutions_data: Dictionary of solutions data
+        task_id: Task ID
+        candidate_output: Optional candidate output for test example
+        valid_programs: Optional list of valid programs to visualize training predictions
+        save_path: Optional path to save the visualization
+    """
     train_examples = task_data[task_id]["train"]
     test_examples = task_data[task_id]["test"]
     
@@ -103,11 +114,25 @@ def visualize_task(
                 if i < len(test_examples):
                     test_ground_truth[i] = solution
     
+    # If we have valid programs, get their predictions for training examples
+    training_predictions = []
+    if valid_programs and len(valid_programs) > 0:
+        # Use the first valid program to predict training outputs
+        program = valid_programs[0]
+        train_inputs = [example["input"] for example in train_examples]
+        
+        # Get training predictions without using asyncio directly
+        # We'll use a helper function that handles the async execution
+        training_predictions = get_training_predictions(program, train_inputs)
+    
     # Determine the number of rows in the figure
     n_rows = len(train_examples) + len(test_examples)
     
+    # Determine the number of columns (3 for standard, 4 if showing training predictions)
+    n_cols = 4 if training_predictions else 3
+    
     # Create figure
-    fig, axes = plt.subplots(n_rows, 3, figsize=(15, 4 * n_rows))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
     
     # If there's only one row, wrap axes in a list
     if n_rows == 1:
@@ -120,7 +145,31 @@ def visualize_task(
     for i, example in enumerate(train_examples):
         plot_grid(axes[i][0], example["input"], f"Train {i+1} Input")
         plot_grid(axes[i][1], example["output"], f"Train {i+1} Expected Output")
-        axes[i][2].axis('off')  # No candidate output for training examples
+        
+        # If we have training predictions, show them
+        if training_predictions and i < len(training_predictions) and training_predictions[i] is not None:
+            # Check if prediction matches expected output
+            is_correct = grid_equals(training_predictions[i], example["output"])
+            
+            # Add a title that indicates correctness
+            title = f"Train {i+1} Prediction"
+            title += f" ({'✓' if is_correct else '✗'})"
+            
+            # Plot with a green or red border based on correctness
+            plot_grid(axes[i][2], training_predictions[i], title)
+            
+            # Add a colored border
+            border_color = 'green' if is_correct else 'red'
+            for spine in axes[i][2].spines.values():
+                spine.set_edgecolor(border_color)
+                spine.set_linewidth(3)
+            axes[i][2].set_frame_on(True)
+        else:
+            axes[i][2].axis('off')
+        
+        # Turn off the last column if we're using 4 columns for training examples
+        if n_cols == 4:
+            axes[i][3].axis('off')
     
     # Plot test examples
     for i, example in enumerate(test_examples):
@@ -132,7 +181,7 @@ def visualize_task(
         
         # Always show the expected output column for test examples
         if ground_truth_available:
-            plot_grid(axes[row_idx][1], test_ground_truth[i], f"Test {i+1} Expected Output")
+            plot_grid(axes[row_idx][1], test_ground_truth[i], f"Test {i+1} Ground Truth")
         elif "output" in example:
             plot_grid(axes[row_idx][1], example["output"], f"Test {i+1} Expected Output")
         else:
@@ -153,7 +202,7 @@ def visualize_task(
             # Add a title that indicates correctness
             title = "Candidate Output"
             if ground_truth_available or "output" in example:
-                title += f" ({'✓ Correct' if is_correct else '✗ Incorrect'})"
+                title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
             plot_grid(axes[row_idx][2], candidate_output, title)
@@ -167,6 +216,10 @@ def visualize_task(
                 axes[row_idx][2].set_frame_on(True)
         else:
             axes[row_idx][2].axis('off')
+        
+        # Turn off the last column if we're using 4 columns
+        if n_cols == 4:
+            axes[row_idx][3].axis('off')
     
     # Adjust layout
     plt.tight_layout()
@@ -178,6 +231,36 @@ def visualize_task(
         print(f"Saved visualization to {save_path}")
     else:
         plt.show()
+
+def get_training_predictions(program: str, inputs: List[List[List[int]]]) -> List[Optional[List[List[int]]]]:
+    """
+    Helper function to get training predictions without directly using asyncio.
+    This avoids the "event loop is already running" error.
+    
+    Args:
+        program: The Python code string containing a solve function
+        inputs: A list of input grids to test
+        
+    Returns:
+        A list of output grids or None for each input if execution failed
+    """
+    from sandbox.runner import run_in_sandbox
+    import asyncio
+    import nest_asyncio
+    
+    # Apply nest_asyncio to allow nested event loops
+    nest_asyncio.apply()
+    
+    # Create a new event loop
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        # Run the sandbox in this loop
+        return loop.run_until_complete(run_in_sandbox(program, inputs))
+    finally:
+        # Clean up
+        loop.close()
 
 def load_task_data(task_file: str) -> Dict[str, Any]:
     """Load task data from a JSON file."""

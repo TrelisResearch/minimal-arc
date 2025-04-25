@@ -95,11 +95,23 @@ async def process_single_task(
         print("Visualizing results...")
         # Use majority_output if available, otherwise use first_program_output
         candidate_output = result.get('majority_output') or result.get('first_program_output')
+        
+        # Get valid programs from the result
+        valid_programs = result.get('valid_program_examples', [])
+        
+        # Check if we have valid programs but the test failed
+        has_valid_programs = result.get('valid_programs', 0) > 0
+        test_failed = not result.get('test_correct', False)
+        
+        if has_valid_programs and test_failed:
+            print("Note: Valid programs exist but test failed. Showing training predictions for comparison.")
+        
         visualize_task(
             task_data=task_data,
             solutions_data=solutions_data,
             task_id=task_id,
             candidate_output=candidate_output,
+            valid_programs=valid_programs,
             save_path=str(save_dir / f"{task_id}.png") if save_dir else None
         )
     
