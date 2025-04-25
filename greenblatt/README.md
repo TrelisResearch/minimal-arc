@@ -98,6 +98,34 @@ deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydanti
 
 The `--visualize` flag will display the input grids, expected output grids (if available), and the candidate output grid. If `--save-viz` is specified, the visualizations will be saved to the specified directory.
 
+The visualization includes:
+- Training examples with input and expected output
+- Test examples with input and expected output (if available)
+- Candidate output with an indicator showing whether it's correct (✓) or incorrect (✗)
+
+## Evaluation Methodology
+
+### Valid Programs
+
+A program is considered "valid" if:
+1. It runs without errors
+2. It produces the correct output for **all** training examples
+
+### Task Solution
+
+A task is considered "solved" if:
+1. There are valid programs
+2. The majority vote of those valid programs produces the correct output for the test example
+
+### Pass@K Evaluation
+
+This implementation uses a simplified approach that approximates pass@1 evaluation:
+- We generate K programs for each task
+- We check how many of those programs are valid
+- We use a majority vote among valid programs to determine the final output
+
+Note that this differs from the standard ARC pass@K methodology, which involves multiple independent runs and a more sophisticated statistical analysis. The standard ARC evaluation typically measures the probability of solving a task with K attempts.
+
 ## Performance Tuning
 
 - **Generation Parameters**: Adjust `--k` and `--concurrency` based on your needs and rate limits
@@ -139,8 +167,9 @@ uv run main.py --task-id 00576224 --k 8 --visualize
 ### Example 2: Running on MIT-Easy Tasks
 
 ```bash
-uv run main.py \
-  --task-file ../arc-data-cleaned/mit-easy.json \
+uv run --with mcp main.py \
+  --task-file ../arc-data/mit-easy.json \
+  --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json \
   --k 8 \
   --concurrency 32 \
   --save-results results/mit_easy_results.json \

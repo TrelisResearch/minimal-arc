@@ -13,7 +13,7 @@ import asyncio
 import json
 import time
 import ast
-from typing import AsyncIterator, List, Dict, Any, Optional
+from typing import AsyncIterator, List, Dict, Any, Optional, Tuple
 from pathlib import Path
 from openai import AsyncOpenAI
 
@@ -163,16 +163,25 @@ async def sample_programs(
             if remaining <= 0:
                 break
 
-async def generate_programs_for_task(
-    task_data: Dict[str, Any], 
-    task_id: str, 
+async def sample_programs_with_usage(
+    prompt: str, 
     k: int, 
     temperature: float = 1.0, 
     concurrency: int = 32
-) -> List[str]:
-    """Generate programs for a specific task."""
-    prompt = build_prompt(task_data, task_id)
-    programs = []
+) -> AsyncIterator[Tuple[str, Any]]:
+    """
+    Sample programs from the API with token usage information.
+    
+    Args:
+        prompt: The prompt to send to the API
+        k: Number of programs to generate
+        temperature: Temperature for generation
+        concurrency: Number of concurrent API calls
+        
+    Yields:
+        Tuples of (program, token_usage)
+    """
+    count = 0
     
     async for program in sample_programs(
         prompt=prompt,
@@ -180,9 +189,43 @@ async def generate_programs_for_task(
         temperature=temperature,
         concurrency=concurrency
     ):
-        programs.append(program)
+        # Get the code from the completion
+        code = extract_code(program)
+        if code:
+            count += 1
+            # For now, we don't have per-completion token usage
+            # so we'll just return the completion as token_usage
+            yield code, None
+
+async def generate_programs_for_task(
+    task_data: Dict[str, Any], 
+    task_id: str, 
+    k: int, 
+    temperature: float = 1.0, 
+    concurrency: int = 32
+) -> AsyncIterator[Tuple[str, Any]]:
+    """
+    Generate programs for a specific task.
     
-    return programs
+    Args:
+        task_data: Dictionary of task data
+        task_id: Task ID
+        k: Number of programs to generate
+        temperature: Temperature for generation
+        concurrency: Number of concurrent API calls
+        
+    Yields:
+        Tuples of (program, token_usage)
+    """
+    prompt = build_prompt(task_data, task_id)
+    
+    async for program, token_usage in sample_programs_with_usage(
+        prompt=prompt,
+        k=k,
+        temperature=temperature,
+        concurrency=concurrency
+    ):
+        yield program, token_usage
 
 def load_task_data(task_file: str) -> Dict[str, Any]:
     """Load task data from a JSON file."""

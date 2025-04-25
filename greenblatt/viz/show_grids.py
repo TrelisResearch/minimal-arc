@@ -70,8 +70,22 @@ def plot_grid(ax, grid: List[List[int]], title: str = None):
     # Turn off axis
     ax.axis('off')
 
+def grid_equals(grid1: List[List[int]], grid2: List[List[int]]) -> bool:
+    """Check if two grids are equal."""
+    # Convert to numpy arrays for comparison
+    array1 = np.array(grid1)
+    array2 = np.array(grid2)
+    
+    # Check if shapes match
+    if array1.shape != array2.shape:
+        return False
+    
+    # Compare all elements
+    return np.array_equal(array1, array2)
+
 def visualize_task(
     task_data: Dict[str, Any], 
+    solutions_data: Dict[str, Any],
     task_id: str, 
     candidate_output: Optional[List[List[int]]] = None,
     save_path: Optional[str] = None
@@ -80,15 +94,27 @@ def visualize_task(
     train_examples = task_data[task_id]["train"]
     test_examples = task_data[task_id]["test"]
     
+    # Get ground truth for test examples from solutions data if available
+    test_ground_truth = {}
+    if task_id in solutions_data:
+        # The solutions data is just an array of outputs
+        if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
+            for i, solution in enumerate(solutions_data[task_id]):
+                if i < len(test_examples):
+                    test_ground_truth[i] = solution
+    
     # Determine the number of rows in the figure
     n_rows = len(train_examples) + len(test_examples)
     
     # Create figure
-    fig, axes = plt.subplots(n_rows, 3, figsize=(12, 4 * n_rows))
+    fig, axes = plt.subplots(n_rows, 3, figsize=(15, 4 * n_rows))
     
     # If there's only one row, wrap axes in a list
     if n_rows == 1:
         axes = [axes]
+    
+    # Add a title to the figure - position it to avoid overlap
+    fig.suptitle(f"Task: {task_id}", fontsize=16, y=0.98)
     
     # Plot training examples
     for i, example in enumerate(train_examples):
@@ -101,20 +127,50 @@ def visualize_task(
         row_idx = len(train_examples) + i
         plot_grid(axes[row_idx][0], example["input"], f"Test {i+1} Input")
         
-        # If we have ground truth for the test example
-        if "output" in example:
+        # Check if we have ground truth from solutions data
+        ground_truth_available = i in test_ground_truth
+        
+        # Always show the expected output column for test examples
+        if ground_truth_available:
+            plot_grid(axes[row_idx][1], test_ground_truth[i], f"Test {i+1} Expected Output")
+        elif "output" in example:
             plot_grid(axes[row_idx][1], example["output"], f"Test {i+1} Expected Output")
         else:
-            axes[row_idx][1].axis('off')
+            axes[row_idx][1].text(0.5, 0.5, "Ground Truth Not Available", 
+                                 horizontalalignment='center', verticalalignment='center',
+                                 transform=axes[row_idx][1].transAxes)
+            axes[row_idx][1].axis('on')
         
         # If we have a candidate output
         if candidate_output is not None:
-            plot_grid(axes[row_idx][2], candidate_output, "Candidate Output")
+            # Determine if the candidate output is correct (if ground truth is available)
+            is_correct = False
+            if ground_truth_available:
+                is_correct = grid_equals(candidate_output, test_ground_truth[i])
+            elif "output" in example:
+                is_correct = grid_equals(candidate_output, example["output"])
+            
+            # Add a title that indicates correctness
+            title = "Candidate Output"
+            if ground_truth_available or "output" in example:
+                title += f" ({'✓ Correct' if is_correct else '✗ Incorrect'})"
+            
+            # Plot with a green or red border based on correctness
+            plot_grid(axes[row_idx][2], candidate_output, title)
+            
+            # Add a colored border if ground truth is available
+            if ground_truth_available or "output" in example:
+                border_color = 'green' if is_correct else 'red'
+                for spine in axes[row_idx][2].spines.values():
+                    spine.set_edgecolor(border_color)
+                    spine.set_linewidth(3)
+                axes[row_idx][2].set_frame_on(True)
         else:
             axes[row_idx][2].axis('off')
     
     # Adjust layout
     plt.tight_layout()
+    plt.subplots_adjust(top=0.95)  # Make room for the suptitle
     
     # Save or show
     if save_path:
@@ -128,10 +184,16 @@ def load_task_data(task_file: str) -> Dict[str, Any]:
     with open(task_file, 'r') as f:
         return json.load(f)
 
+def load_solutions_data(solutions_file: str) -> Dict[str, Any]:
+    """Load solutions data from a JSON file."""
+    with open(solutions_file, 'r') as f:
+        return json.load(f)
+
 def main():
     """Main function for command-line usage."""
     parser = argparse.ArgumentParser(description="Visualize ARC tasks")
     parser.add_argument("task_file", help="Path to task JSON file")
+    parser.add_argument("solutions_file", help="Path to solutions JSON file")
     parser.add_argument("--task-id", help="Specific task ID to visualize")
     parser.add_argument("--candidate", help="Path to JSON file with candidate outputs")
     parser.add_argument("--save", help="Path to save visualization")
@@ -139,6 +201,9 @@ def main():
     
     # Load task data
     task_data = load_task_data(args.task_file)
+    
+    # Load solutions data
+    solutions_data = load_solutions_data(args.solutions_file)
     
     # Load candidate outputs if provided
     candidate_outputs = None
@@ -158,6 +223,7 @@ def main():
         
         visualize_task(
             task_data, 
+            solutions_data,
             args.task_id, 
             candidate_output,
             args.save
@@ -177,6 +243,7 @@ def main():
             
             visualize_task(
                 task_data, 
+                solutions_data,
                 task_id, 
                 candidate_output,
                 save_path

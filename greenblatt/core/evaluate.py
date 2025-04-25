@@ -14,6 +14,7 @@ from sandbox.runner import run_in_sandbox
 
 def grid_equals(grid1: List[List[int]], grid2: List[List[int]]) -> bool:
     """Check if two grids are equal."""
+    # Check if dimensions match
     if len(grid1) != len(grid2):
         return False
     
@@ -134,6 +135,7 @@ async def majority_vote(
 
 async def evaluate_task(
     task_data: Dict[str, Any], 
+    solutions_data: Dict[str, Any],
     task_id: str, 
     programs: List[str]
 ) -> Dict[str, Any]:
@@ -142,6 +144,7 @@ async def evaluate_task(
     
     Args:
         task_data: Dictionary of task data
+        solutions_data: Dictionary of solutions data
         task_id: Task ID
         programs: List of Python code strings
         
@@ -150,6 +153,13 @@ async def evaluate_task(
     """
     train_examples = task_data[task_id]["train"]
     test_input = task_data[task_id]["test"][0]["input"]
+    
+    # Get ground truth for test example from solutions data if available
+    test_output = None
+    if task_id in solutions_data:
+        # The solutions data is just an array of outputs
+        if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
+            test_output = solutions_data[task_id][0]
     
     # Filter valid programs
     valid_programs = await filter_valid_programs(programs, train_examples)
@@ -164,12 +174,19 @@ async def evaluate_task(
         if outputs and outputs[0] is not None:
             first_program_output = outputs[0]
     
+    # Check if the majority output matches the ground truth
+    test_correct = False
+    if majority_output and test_output:
+        test_correct = grid_equals(majority_output, test_output)
+    
     return {
         "task_id": task_id,
         "total_programs": len(programs),
         "valid_programs": len(valid_programs),
         "valid_ratio": len(valid_programs) / len(programs) if programs else 0,
         "majority_output": majority_output,
-        "first_program_output": first_program_output,  
+        "first_program_output": first_program_output,
+        "test_output": test_output,  # Add the ground truth
+        "test_correct": test_correct,  # Add whether the test output is correct
         "valid_program_examples": valid_programs[:3] if valid_programs else []
     }
