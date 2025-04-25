@@ -69,12 +69,12 @@ async def process_single_task(
     print(f"Elapsed time: {elapsed_time:.2f} seconds")
     
     # Visualize if requested
-    if visualize and result['majority_output']:
+    if visualize:
         print("Visualizing results...")
         visualize_task(
             task_data=task_data,
             task_id=task_id,
-            candidate_output=result['majority_output'],
+            candidate_output=result.get('majority_output'),
             save_path=str(save_dir / f"{task_id}.png") if save_dir else None
         )
     
