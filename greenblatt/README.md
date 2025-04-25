@@ -185,3 +185,26 @@ uv run main.py \
   --data-file ../arc-data-cleaned/arc-agi_training_challenges.json \
   --k 8 \
   --visualize
+```
+
+### Example 3: Analyzing Performance with Different k Values
+
+To analyze how performance varies with different values of k, you can use the `run_k_analysis.py` script:
+
+```bash
+uv run --with mcp run_k_analysis.py \
+  --task-file ../arc-data/mit-easy.json \
+  --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json \
+  --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json \
+  --k-values 2,8,32 \
+  --concurrency 32 \
+  --output-dir results/k_analysis
+```
+
+This will:
+1. Run the specified tasks with k=2, k=8, and k=32
+2. Save the results for each k value in the output directory
+3. Generate a plot showing how the number of correct tasks varies with k
+4. Print a summary of the results
+
+The script uses our majority voting approach, which is more strict than the standard pass@k metric used in ARC benchmarks. In our approach, a task is only considered correct if the majority of valid programs produce the correct output.

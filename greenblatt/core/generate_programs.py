@@ -94,7 +94,11 @@ async def sample_programs(
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY environment variable not set")
     
-    sem = asyncio.Semaphore(concurrency)
+    # Create a semaphore to limit concurrency
+    semaphore = asyncio.Semaphore(concurrency)
+    
+    # Create a queue for completed programs
+    queue = asyncio.Queue()
     
     # Create the AsyncOpenAI client
     client = AsyncOpenAI(
@@ -102,12 +106,13 @@ async def sample_programs(
         api_key=OPENROUTER_API_KEY,
     )
     
-    async def _single_call() -> List[str]:
+    async def sample_program_with_backoff() -> None:
+        """Sample a single program with backoff for rate limits."""
         # Implement exponential backoff for rate limits
         max_retries = 5
         for attempt in range(max_retries):
             try:
-                async with sem:
+                async with semaphore:
                     # Make the request with extra_headers
                     response = await client.chat.completions.create(
                         model=MODEL_ID,
@@ -126,13 +131,13 @@ async def sample_programs(
                         print(f"Token usage: {response.usage}")
                     
                     # Extract and validate code from responses
-                    codes = []
                     for choice in response.choices:
                         code = extract_code(choice.message.content)
                         if code and is_valid_python(code):
-                            codes.append(code)
+                            await queue.put(code)
                     
-                    return codes
+                    # Signal completion
+                    return
             
             except Exception as e:
                 if hasattr(e, 'status_code') and e.status_code == 429:  # Rate limit exceeded
@@ -149,19 +154,37 @@ async def sample_programs(
                         await asyncio.sleep(wait_time)
                     else:
                         print(f"Failed after {max_retries} attempts")
-                        return []
+                        await queue.put(None)  # Signal failure
+                        return
         
         # If we get here, all retries failed
-        return []
-
+        await queue.put(None)  # Signal failure
+    
+    # Create tasks for API calls
+    tasks = []
+    for _ in range(k):
+        task = asyncio.create_task(sample_program_with_backoff())
+        tasks.append(task)
+    
+    # Process completed programs as they arrive
     remaining = k
     while remaining > 0:
-        got = await _single_call()
-        for code in got:
-            yield code
+        program = await queue.get()
+        if program is not None:
+            yield program
             remaining -= 1
-            if remaining <= 0:
-                break
+        else:
+            # If we got None, it means a task failed
+            # We'll just decrement remaining to account for it
+            remaining -= 1
+    
+    # Cancel any remaining tasks
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    
+    # Wait for all tasks to complete
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 async def sample_programs_with_usage(
     prompt: str, 
