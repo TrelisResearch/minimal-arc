@@ -71,10 +71,12 @@ async def process_single_task(
     # Visualize if requested
     if visualize:
         print("Visualizing results...")
+        # Use majority_output if available, otherwise use first_program_output
+        candidate_output = result.get('majority_output') or result.get('first_program_output')
         visualize_task(
             task_data=task_data,
             task_id=task_id,
-            candidate_output=result.get('majority_output'),
+            candidate_output=candidate_output,
             save_path=str(save_dir / f"{task_id}.png") if save_dir else None
         )
     

@@ -154,8 +154,15 @@ async def evaluate_task(
     # Filter valid programs
     valid_programs = await filter_valid_programs(programs, train_examples)
     
-    # Get majority vote for test input
-    majority_output = await majority_vote(valid_programs, test_input)
+    # Get majority vote for test input if there are valid programs
+    majority_output = await majority_vote(valid_programs, test_input) if valid_programs else None
+    
+    # If no valid programs but we have programs, get the output of the first program
+    first_program_output = None
+    if not majority_output and programs:
+        outputs = await run_in_sandbox(programs[0], [test_input])
+        if outputs and outputs[0] is not None:
+            first_program_output = outputs[0]
     
     return {
         "task_id": task_id,
@@ -163,5 +170,6 @@ async def evaluate_task(
         "valid_programs": len(valid_programs),
         "valid_ratio": len(valid_programs) / len(programs) if programs else 0,
         "majority_output": majority_output,
+        "first_program_output": first_program_output,  
         "valid_program_examples": valid_programs[:3] if valid_programs else []
     }
