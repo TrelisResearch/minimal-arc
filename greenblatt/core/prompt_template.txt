@@ -1,13 +1,28 @@
 You are an expert Python programmer. Learn the grid-to-grid transformation
-from the TRAINING examples and write a **pure function**:
-```python
-def solve(grid: List[List[int]]) -> List[List[int]]:
-    ...
-```
-Constraints:
+from the TRAINING examples and write a **complete solution** with a `solve` function:
 
-No I/O, network, or random numbers
-Only builtin Python + itertools, math, copy
+```python
+# Include any necessary imports here
+# (limited to: itertools, math, copy)
+
+def solve(grid: List[List[int]]) -> List[List[int]]:
+    """
+    Transform the input grid according to the pattern learned from training examples.
+    
+    Args:
+        grid: A 2D list of integers representing the input grid
+        
+    Returns:
+        A 2D list of integers representing the transformed output grid
+    """
+    # Your solution here
+```
+
+Constraints:
+- No I/O, network, or random numbers
+- Only use Python builtins and the allowed modules: itertools, math, copy
+- Your code will be executed directly, so include any imports you need
+- The function MUST be named `solve` and accept a single grid parameter
 
 TRAINING: {{TRAIN_BLOCK}}
 

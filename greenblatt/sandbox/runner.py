@@ -35,32 +35,28 @@ async def run_in_sandbox(code: str, inputs: List[List[List[int]]], timeout: floa
     Returns:
         A list of output grids or None for each input if execution failed
     """
-    # Prepare the full code with imports and wrapper
+    # Prepare the full code with minimal wrapper
+    # The code should already contain a solve function and any necessary imports
     full_code = f"""
 # /// script
 # dependencies = []
 # ///
 
-import json
-
-# LLM-generated code
 {code}
 
-# Test function
-def run_tests(inputs):
-    results = []
-    for inp in inputs:
-        try:
-            result = solve(inp)
-            results.append(result)
-        except Exception as e:
-            print(f"Error: {{e}}")
-            results.append(None)
-    return results
-
-# Run tests
+# Run tests on the provided inputs
+import json
 inputs = {json.dumps(inputs)}
-results = run_tests(inputs)
+results = []
+for inp in inputs:
+    try:
+        result = solve(inp)
+        results.append(result)
+    except Exception as e:
+        print(f"Error: {{e}}")
+        results.append(None)
+
+# Output results as JSON
 print(json.dumps(results))
 """
     
