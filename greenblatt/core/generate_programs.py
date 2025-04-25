@@ -87,10 +87,25 @@ def is_valid_python(code: str) -> bool:
 async def sample_programs(
     prompt: str, 
     k: int, 
-    temperature: float = 1.0, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
     concurrency: int = 32
 ) -> AsyncIterator[str]:
-    """Streams ~k completions; respects OpenRouter rate-limits with a semaphore."""
+    """
+    Streams ~k completions; respects OpenRouter rate-limits with a semaphore.
+    
+    Args:
+        prompt: The prompt to send to the API
+        k: Number of programs to generate
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
+        concurrency: Number of concurrent API calls
+    
+    Yields:
+        Generated program strings
+    """
     if not OPENROUTER_API_KEY:
         raise ValueError("OPENROUTER_API_KEY environment variable not set")
     
@@ -117,6 +132,7 @@ async def sample_programs(
                     response = await client.chat.completions.create(
                         model=MODEL_ID,
                         temperature=temperature,
+                        top_p=top_p,
                         messages=[
                             {"role": "user", "content": prompt}
                         ],
@@ -189,7 +205,9 @@ async def sample_programs(
 async def sample_programs_with_usage(
     prompt: str, 
     k: int, 
-    temperature: float = 1.0, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
     concurrency: int = 32
 ) -> AsyncIterator[Tuple[str, Any]]:
     """
@@ -198,7 +216,9 @@ async def sample_programs_with_usage(
     Args:
         prompt: The prompt to send to the API
         k: Number of programs to generate
-        temperature: Temperature for generation
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
         concurrency: Number of concurrent API calls
         
     Yields:
@@ -210,6 +230,8 @@ async def sample_programs_with_usage(
         prompt=prompt,
         k=k,
         temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
         concurrency=concurrency
     ):
         # Get the code from the completion
@@ -224,7 +246,9 @@ async def generate_programs_for_task(
     task_data: Dict[str, Any], 
     task_id: str, 
     k: int, 
-    temperature: float = 1.0, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
     concurrency: int = 32
 ) -> AsyncIterator[Tuple[str, Any]]:
     """
@@ -234,7 +258,9 @@ async def generate_programs_for_task(
         task_data: Dictionary of task data
         task_id: Task ID
         k: Number of programs to generate
-        temperature: Temperature for generation
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
         concurrency: Number of concurrent API calls
         
     Yields:
@@ -246,6 +272,8 @@ async def generate_programs_for_task(
         prompt=prompt,
         k=k,
         temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
         concurrency=concurrency
     ):
         yield program, token_usage
@@ -256,6 +284,18 @@ def load_task_data(task_file: str) -> Dict[str, Any]:
         return json.load(f)
 
 def load_task_ids(task_list_file: str) -> List[str]:
-    """Load a list of task IDs from a JSON file."""
+    """
+    Load a list of task IDs from a JSON file.
+    
+    Handles both dictionary format (returns keys) and list format (returns the list).
+    """
     with open(task_list_file, 'r') as f:
-        return json.load(f)
+        data = json.load(f)
+        
+        # Handle both dictionary and list formats
+        if isinstance(data, dict):
+            return list(data.keys())
+        elif isinstance(data, list):
+            return data
+        else:
+            raise ValueError(f"Unexpected format in {task_list_file}. Expected dict or list, got {type(data)}")
