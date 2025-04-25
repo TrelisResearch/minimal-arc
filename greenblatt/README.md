@@ -170,7 +170,7 @@ uv run main.py --task-id 00576224 --k 8 --visualize
 uv run --with mcp main.py \
   --task-file ../arc-data/mit-easy.json \
   --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json \
-  --k 4 \
+  --k 32 \
   --concurrency 32 \
   --save-results results/mit_easy_results.json \
   --visualize \

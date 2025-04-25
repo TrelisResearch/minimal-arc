@@ -99,6 +99,9 @@ async def process_single_task(
         # Get valid programs from the result
         valid_programs = result.get('valid_program_examples', [])
         
+        # Get training predictions from the result
+        training_predictions = result.get('training_predictions', {})
+        
         # Check if we have valid programs but the test failed
         has_valid_programs = result.get('valid_programs', 0) > 0
         test_failed = not result.get('test_correct', False)
@@ -112,7 +115,8 @@ async def process_single_task(
             task_id=task_id,
             candidate_output=candidate_output,
             valid_programs=valid_programs,
-            save_path=str(save_dir / f"{task_id}.png") if save_dir else None
+            save_path=str(save_dir / f"{task_id}.png") if save_dir else None,
+            training_predictions=training_predictions
         )
     
     return result

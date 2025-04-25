@@ -32,80 +32,120 @@ def hash_code(code: str) -> str:
     normalized = "\n".join(line.strip() for line in code.strip().split("\n") if line.strip())
     return hashlib.md5(normalized.encode()).hexdigest()
 
-async def evaluate_program(
-    code: str, 
-    train_examples: List[Dict[str, List[List[int]]]], 
+async def evaluate_programs_batch(
+    programs: List[str],
+    train_examples: List[Dict[str, List[List[int]]]],
+    test_input: List[List[int]],
     code_hashes: Set[str] = None
-) -> Tuple[bool, str]:
+) -> Dict[str, Any]:
     """
-    Evaluate a program against training examples.
-    
-    Args:
-        code: The Python code string containing a solve function
-        train_examples: List of training examples with 'input' and 'output' keys
-        code_hashes: Set of code hashes for deduplication
-        
-    Returns:
-        (is_valid, code): Tuple of validation result and the code
-    """
-    # Check for duplicate code
-    if code_hashes is not None:
-        code_hash = hash_code(code)
-        if code_hash in code_hashes:
-            return False, code
-        code_hashes.add(code_hash)
-    
-    # Prepare inputs and expected outputs
-    inputs = [example["input"] for example in train_examples]
-    expected_outputs = [example["output"] for example in train_examples]
-    
-    # Run the program in the sandbox
-    outputs = await run_in_sandbox(code, inputs)
-    
-    # Check if all outputs match expected outputs
-    if outputs is None:
-        return False, code
-    
-    for output, expected in zip(outputs, expected_outputs):
-        if output is None or not grid_equals(output, expected):
-            return False, code
-    
-    return True, code
-
-async def filter_valid_programs(
-    programs: List[str], 
-    train_examples: List[Dict[str, List[List[int]]]]
-) -> List[str]:
-    """
-    Filter out invalid programs.
+    Evaluate all programs against training examples and test input in a single batch.
     
     Args:
         programs: List of Python code strings
         train_examples: List of training examples with 'input' and 'output' keys
+        test_input: Test input grid
+        code_hashes: Set of code hashes for deduplication
         
     Returns:
-        List of valid programs
+        Dictionary with evaluation results including valid programs and their outputs
     """
+    if not programs:
+        return {
+            "valid_programs": [],
+            "training_predictions": {},
+            "test_predictions": {},
+            "first_program_test_output": None
+        }
+    
+    # Deduplicate programs
+    unique_programs = []
+    program_indices = {}  # Maps program index in unique_programs to original index
+    
+    if code_hashes is None:
+        code_hashes = set()
+        
+    for i, program in enumerate(programs):
+        code_hash = hash_code(program)
+        if code_hash not in code_hashes:
+            code_hashes.add(code_hash)
+            program_indices[len(unique_programs)] = i
+            unique_programs.append(program)
+    
+    # Prepare all inputs (training + test)
+    train_inputs = [example["input"] for example in train_examples]
+    expected_outputs = [example["output"] for example in train_examples]
+    all_inputs = train_inputs + [test_input]
+    
+    # Run all programs on all inputs in a single batch
+    all_results = {}
+    for i, program in enumerate(unique_programs):
+        # Run the program on all inputs
+        outputs = await run_in_sandbox(program, all_inputs)
+        
+        if outputs is None:
+            continue
+            
+        # Split results into training and test outputs
+        train_outputs = outputs[:len(train_inputs)]
+        test_output = outputs[len(train_inputs)] if len(outputs) > len(train_inputs) else None
+        
+        # Check if all training outputs match expected outputs
+        is_valid = True
+        for output, expected in zip(train_outputs, expected_outputs):
+            if output is None or not grid_equals(output, expected):
+                is_valid = False
+                break
+        
+        # Store results for this program
+        orig_index = program_indices[i]
+        all_results[orig_index] = {
+            "program": program,
+            "is_valid": is_valid,
+            "training_outputs": train_outputs,
+            "test_output": test_output
+        }
+    
+    # Collect valid programs and their outputs
     valid_programs = []
-    code_hashes = set()
+    training_predictions = {}
+    test_predictions = {}
+    first_program_test_output = None
     
-    for program in programs:
-        is_valid, code = await evaluate_program(program, train_examples, code_hashes)
-        if is_valid:
-            valid_programs.append(code)
+    # Get the first program's test output (valid or not)
+    if programs and 0 in all_results and all_results[0]["test_output"] is not None:
+        first_program_test_output = all_results[0]["test_output"]
     
-    return valid_programs
+    # Process results in original program order
+    for i in range(len(programs)):
+        if i in all_results and all_results[i]["is_valid"]:
+            program = all_results[i]["program"]
+            valid_programs.append(program)
+            
+            # Store training predictions for this valid program
+            training_predictions[program] = all_results[i]["training_outputs"]
+            
+            # Store test prediction for this valid program
+            if all_results[i]["test_output"] is not None:
+                test_predictions[program] = all_results[i]["test_output"]
+    
+    return {
+        "valid_programs": valid_programs,
+        "training_predictions": training_predictions,
+        "test_predictions": test_predictions,
+        "first_program_test_output": first_program_test_output
+    }
 
 async def majority_vote(
-    valid_programs: List[str], 
-    test_input: List[List[int]]
+    valid_programs: List[str],
+    test_predictions: Dict[str, List[List[int]]]
 ) -> Optional[List[List[int]]]:
     """
-    Run all valid programs on the test input and take the majority vote.
+    Take the majority vote of all valid programs' test predictions.
     
     Args:
         valid_programs: List of valid Python code strings
-        test_input: Test input grid
+        test_predictions: Dictionary mapping programs to their test predictions
         
     Returns:
         The majority output grid or None if no valid output
@@ -113,12 +153,11 @@ async def majority_vote(
     if not valid_programs:
         return None
     
-    # Run all programs on the test input
+    # Collect all outputs for the test input
     all_outputs = []
     for program in valid_programs:
-        outputs = await run_in_sandbox(program, [test_input])
-        if outputs and outputs[0] is not None:
-            all_outputs.append(json.dumps(outputs[0]))
+        if program in test_predictions and test_predictions[program] is not None:
+            all_outputs.append(json.dumps(test_predictions[program]))
     
     if not all_outputs:
         return None
@@ -161,18 +200,16 @@ async def evaluate_task(
         if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
             test_output = solutions_data[task_id][0]
     
-    # Filter valid programs
-    valid_programs = await filter_valid_programs(programs, train_examples)
+    # Evaluate all programs in a single batch
+    batch_results = await evaluate_programs_batch(programs, train_examples, test_input)
+    
+    valid_programs = batch_results["valid_programs"]
+    training_predictions = batch_results["training_predictions"]
+    test_predictions = batch_results["test_predictions"]
+    first_program_output = batch_results["first_program_test_output"]
     
     # Get majority vote for test input if there are valid programs
-    majority_output = await majority_vote(valid_programs, test_input) if valid_programs else None
-    
-    # If no valid programs but we have programs, get the output of the first program
-    first_program_output = None
-    if not majority_output and programs:
-        outputs = await run_in_sandbox(programs[0], [test_input])
-        if outputs and outputs[0] is not None:
-            first_program_output = outputs[0]
+    majority_output = await majority_vote(valid_programs, test_predictions) if valid_programs else None
     
     # Check if the majority output matches the ground truth
     test_correct = False
@@ -188,5 +225,6 @@ async def evaluate_task(
         "first_program_output": first_program_output,
         "test_output": test_output,  # Add the ground truth
         "test_correct": test_correct,  # Add whether the test output is correct
-        "valid_program_examples": valid_programs[:3] if valid_programs else []
+        "valid_program_examples": valid_programs[:3] if valid_programs else [],
+        "training_predictions": training_predictions  # Add training predictions for visualization
     }

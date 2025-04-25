@@ -89,7 +89,8 @@ def visualize_task(
     task_id: str, 
     candidate_output: Optional[List[List[int]]] = None,
     valid_programs: Optional[List[str]] = None,
-    save_path: Optional[str] = None
+    save_path: Optional[str] = None,
+    training_predictions: Optional[Dict[str, List[List[List[int]]]]] = None
 ):
     """
     Visualize a task with input, expected output, and candidate output.
@@ -101,6 +102,7 @@ def visualize_task(
         candidate_output: Optional candidate output for test example
         valid_programs: Optional list of valid programs to visualize training predictions
         save_path: Optional path to save the visualization
+        training_predictions: Optional dictionary mapping programs to their training predictions
     """
     train_examples = task_data[task_id]["train"]
     test_examples = task_data[task_id]["test"]
@@ -114,22 +116,22 @@ def visualize_task(
                 if i < len(test_examples):
                     test_ground_truth[i] = solution
     
-    # If we have valid programs, get their predictions for training examples
-    training_predictions = []
-    if valid_programs and len(valid_programs) > 0:
-        # Use the first valid program to predict training outputs
-        program = valid_programs[0]
-        train_inputs = [example["input"] for example in train_examples]
-        
-        # Get training predictions without using asyncio directly
-        # We'll use a helper function that handles the async execution
-        training_predictions = get_training_predictions(program, train_inputs)
+    # Check if we have valid programs and training predictions
+    has_training_predictions = False
+    program_training_outputs = []
+    
+    if valid_programs and len(valid_programs) > 0 and training_predictions:
+        # Use the first valid program's training predictions
+        first_valid_program = valid_programs[0]
+        if first_valid_program in training_predictions:
+            program_training_outputs = training_predictions[first_valid_program]
+            has_training_predictions = len(program_training_outputs) > 0
     
     # Determine the number of rows in the figure
     n_rows = len(train_examples) + len(test_examples)
     
     # Determine the number of columns (3 for standard, 4 if showing training predictions)
-    n_cols = 4 if training_predictions else 3
+    n_cols = 4 if has_training_predictions else 3
     
     # Create figure
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
@@ -147,16 +149,16 @@ def visualize_task(
         plot_grid(axes[i][1], example["output"], f"Train {i+1} Expected Output")
         
         # If we have training predictions, show them
-        if training_predictions and i < len(training_predictions) and training_predictions[i] is not None:
+        if has_training_predictions and i < len(program_training_outputs) and program_training_outputs[i] is not None:
             # Check if prediction matches expected output
-            is_correct = grid_equals(training_predictions[i], example["output"])
+            is_correct = grid_equals(program_training_outputs[i], example["output"])
             
             # Add a title that indicates correctness
             title = f"Train {i+1} Prediction"
             title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
-            plot_grid(axes[i][2], training_predictions[i], title)
+            plot_grid(axes[i][2], program_training_outputs[i], title)
             
             # Add a colored border
             border_color = 'green' if is_correct else 'red'
@@ -200,14 +202,14 @@ def visualize_task(
                 is_correct = grid_equals(candidate_output, example["output"])
             
             # Add a title that indicates correctness
-            title = "Candidate Output"
+            title = f"Test {i+1} Prediction"
             if ground_truth_available or "output" in example:
                 title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
             plot_grid(axes[row_idx][2], candidate_output, title)
             
-            # Add a colored border if ground truth is available
+            # Add a colored border if we know whether it's correct
             if ground_truth_available or "output" in example:
                 border_color = 'green' if is_correct else 'red'
                 for spine in axes[row_idx][2].spines.values():
@@ -215,52 +217,24 @@ def visualize_task(
                     spine.set_linewidth(3)
                 axes[row_idx][2].set_frame_on(True)
         else:
-            axes[row_idx][2].axis('off')
+            axes[row_idx][2].text(0.5, 0.5, "No Valid Programs", 
+                                 horizontalalignment='center', verticalalignment='center',
+                                 transform=axes[row_idx][2].transAxes)
+            axes[row_idx][2].axis('on')
         
-        # Turn off the last column if we're using 4 columns
+        # Turn off the last column for test examples
         if n_cols == 4:
             axes[row_idx][3].axis('off')
     
     # Adjust layout
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.95)  # Make room for the suptitle
+    plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave space for the title
     
-    # Save or show
+    # Save or show the figure
     if save_path:
-        plt.savefig(save_path)
-        print(f"Saved visualization to {save_path}")
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close(fig)  # Close the figure to free memory
     else:
         plt.show()
-
-def get_training_predictions(program: str, inputs: List[List[List[int]]]) -> List[Optional[List[List[int]]]]:
-    """
-    Helper function to get training predictions without directly using asyncio.
-    This avoids the "event loop is already running" error.
-    
-    Args:
-        program: The Python code string containing a solve function
-        inputs: A list of input grids to test
-        
-    Returns:
-        A list of output grids or None for each input if execution failed
-    """
-    from sandbox.runner import run_in_sandbox
-    import asyncio
-    import nest_asyncio
-    
-    # Apply nest_asyncio to allow nested event loops
-    nest_asyncio.apply()
-    
-    # Create a new event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    try:
-        # Run the sandbox in this loop
-        return loop.run_until_complete(run_in_sandbox(program, inputs))
-    finally:
-        # Clean up
-        loop.close()
 
 def load_task_data(task_file: str) -> Dict[str, Any]:
     """Load task data from a JSON file."""
@@ -275,61 +249,55 @@ def load_solutions_data(solutions_file: str) -> Dict[str, Any]:
 def main():
     """Main function for command-line usage."""
     parser = argparse.ArgumentParser(description="Visualize ARC tasks")
-    parser.add_argument("task_file", help="Path to task JSON file")
-    parser.add_argument("solutions_file", help="Path to solutions JSON file")
+    parser.add_argument("task_file", help="Path to the task JSON file")
+    parser.add_argument("--solutions-file", help="Path to the solutions JSON file")
     parser.add_argument("--task-id", help="Specific task ID to visualize")
-    parser.add_argument("--candidate", help="Path to JSON file with candidate outputs")
-    parser.add_argument("--save", help="Path to save visualization")
+    parser.add_argument("--output-dir", help="Directory to save visualizations")
     args = parser.parse_args()
     
     # Load task data
     task_data = load_task_data(args.task_file)
     
-    # Load solutions data
-    solutions_data = load_solutions_data(args.solutions_file)
+    # Load solutions data if provided
+    solutions_data = {}
+    if args.solutions_file:
+        solutions_data = load_solutions_data(args.solutions_file)
     
-    # Load candidate outputs if provided
-    candidate_outputs = None
-    if args.candidate:
-        with open(args.candidate, 'r') as f:
-            candidate_outputs = json.load(f)
+    # Create output directory if needed
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
     
     # If task ID is provided, visualize only that task
     if args.task_id:
         if args.task_id not in task_data:
-            print(f"Task ID {args.task_id} not found in {args.task_file}")
+            print(f"Task ID {args.task_id} not found in task data")
             return
         
-        candidate_output = None
-        if candidate_outputs and args.task_id in candidate_outputs:
-            candidate_output = candidate_outputs[args.task_id]
+        save_path = None
+        if args.output_dir:
+            save_path = str(Path(args.output_dir) / f"{args.task_id}.png")
         
         visualize_task(
-            task_data, 
-            solutions_data,
-            args.task_id, 
-            candidate_output,
-            args.save
+            task_data=task_data,
+            solutions_data=solutions_data,
+            task_id=args.task_id,
+            save_path=save_path
         )
     else:
         # Visualize all tasks
         for task_id in task_data:
-            candidate_output = None
-            if candidate_outputs and task_id in candidate_outputs:
-                candidate_output = candidate_outputs[task_id]
+            print(f"Visualizing task {task_id}")
             
             save_path = None
-            if args.save:
-                save_dir = Path(args.save)
-                save_dir.mkdir(exist_ok=True)
-                save_path = save_dir / f"{task_id}.png"
+            if args.output_dir:
+                save_path = str(Path(args.output_dir) / f"{task_id}.png")
             
             visualize_task(
-                task_data, 
-                solutions_data,
-                task_id, 
-                candidate_output,
-                save_path
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=task_id,
+                save_path=save_path
             )
 
 if __name__ == "__main__":
