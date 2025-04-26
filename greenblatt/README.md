@@ -169,7 +169,7 @@ uv run main.py --task-id 00576224 --data-file ../arc-data-cleaned/arc-agi_traini
 To analyze how performance varies with different values of k, you can use the `run_k_analysis.py` script:
 
 ```bash
-uv run run_k_analysis.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json --k-values 2,8,32 --concurrency 32 --output-dir results/k_analysis
+uv run run_k_analysis.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json --k-values 2,8,32 --concurrency 32 --output-dir results/k_analysis --no-sandbox
 ```
 
 This will:

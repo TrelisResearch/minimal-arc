@@ -27,6 +27,7 @@ else:
 
 # Import from the existing codebase
 from cli.main import process_task_file
+from sandbox.runner import set_use_local_executor
 
 
 async def run_with_different_k(
@@ -51,7 +52,7 @@ async def run_with_different_k(
         output_dir: Directory to save results
         
     Returns:
-        Dictionary mapping k values to results
+        Dictionary mapping k values to task results
     """
     # Create output directory
     output_path = Path(output_dir)
@@ -68,12 +69,14 @@ async def run_with_different_k(
         k_dir = output_path / f"k_{k}"
         k_dir.mkdir(exist_ok=True)
         
-        # Run the task file
+        # Process the task file
         result = await process_task_file(
             task_file=task_file,
             task_ids_file=task_file,
             k=k,
             temperature=temperature,
+            top_p=1.0,
+            top_k=40,
             concurrency=concurrency,
             data_file=data_file,
             solutions_file=solutions_file,
@@ -194,8 +197,13 @@ async def main():
     # Output options
     parser.add_argument("--output-dir", type=str, default="results/k_analysis",
                         help="Directory to save results")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="Use local Python executor with AST-based security instead of MCP sandbox")
     
     args = parser.parse_args()
+    
+    # Configure sandbox mode
+    set_use_local_executor(args.no_sandbox)
     
     # Parse k values
     k_values = [int(k) for k in args.k_values.split(",")]
