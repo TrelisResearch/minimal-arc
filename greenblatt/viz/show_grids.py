@@ -43,7 +43,7 @@ def pad_grid(grid: List[List[int]], max_rows: int, max_cols: int) -> np.ndarray:
     
     return grid_array
 
-def plot_grid(ax, grid: Union[List[List[int]], np.ndarray], title: str = None):
+def plot_grid(ax, grid: Union[List[List[int]], np.ndarray], title: str = None, border_color: Optional[str] = None):
     """Plot a single grid on the given axis."""
     # Convert to numpy array if not already
     if not isinstance(grid, np.ndarray):
@@ -71,8 +71,15 @@ def plot_grid(ax, grid: Union[List[List[int]], np.ndarray], title: str = None):
     if title:
         ax.set_title(title)
     
-    # Turn off axis
-    ax.axis('off')
+    # Add colored border if specified
+    if border_color:
+        for spine in ax.spines.values():
+            spine.set_edgecolor(border_color)
+            spine.set_linewidth(3)
+        ax.set_frame_on(True)
+    else:
+        # Turn off axis
+        ax.axis('off')
 
 def grid_equals(grid1: Union[List[List[int]], np.ndarray], grid2: Union[List[List[int]], np.ndarray]) -> bool:
     """Check if two grids are equal."""
@@ -171,15 +178,15 @@ def visualize_task(
     # Determine the number of columns (3 for standard, 4 if showing training predictions)
     n_cols = 4 if has_training_predictions else 3
     
-    # Create figure
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(5 * n_cols, 4 * n_rows))
+    # Use a smaller figure size to reduce memory usage
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), dpi=80)
     
     # If there's only one row, wrap axes in a list
     if n_rows == 1:
         axes = [axes]
     
     # Add a title to the figure - position it to avoid overlap
-    fig.suptitle(f"Task: {task_id}", fontsize=16, y=0.98)
+    fig.suptitle(f"Task: {task_id}", fontsize=14, y=0.98)
     
     # Plot training examples
     for i, example in enumerate(train_examples):
@@ -192,18 +199,11 @@ def visualize_task(
             is_correct = np.array_equal(program_training_arrays[i], example["output_array"])
             
             # Add a title that indicates correctness
-            title = f"Train {i+1} Prediction"
-            title += f" ({'✓' if is_correct else '✗'})"
+            title = f"Train {i+1} Prediction ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
-            plot_grid(axes[i][2], program_training_arrays[i], title)
-            
-            # Add a colored border
             border_color = 'green' if is_correct else 'red'
-            for spine in axes[i][2].spines.values():
-                spine.set_edgecolor(border_color)
-                spine.set_linewidth(3)
-            axes[i][2].set_frame_on(True)
+            plot_grid(axes[i][2], program_training_arrays[i], title, border_color)
         else:
             axes[i][2].axis('off')
         
@@ -245,15 +245,11 @@ def visualize_task(
                 title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
-            plot_grid(axes[row_idx][2], candidate_output_array, title)
-            
-            # Add a colored border if we know correctness
+            border_color = None
             if ground_truth_available or "output_array" in example:
                 border_color = 'green' if is_correct else 'red'
-                for spine in axes[row_idx][2].spines.values():
-                    spine.set_edgecolor(border_color)
-                    spine.set_linewidth(3)
-                axes[row_idx][2].set_frame_on(True)
+            
+            plot_grid(axes[row_idx][2], candidate_output_array, title, border_color)
         else:
             axes[row_idx][2].axis('off')
         
@@ -261,12 +257,12 @@ def visualize_task(
         if n_cols == 4:
             axes[row_idx][3].axis('off')
     
-    # Adjust layout
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
+    # Use a simpler layout adjustment instead of tight_layout
+    plt.subplots_adjust(hspace=0.4, wspace=0.3, top=0.95, bottom=0.05, left=0.05, right=0.95)
     
     # Save or show the figure
     if save_path:
-        plt.savefig(save_path, dpi=100, bbox_inches='tight')
+        plt.savefig(save_path, dpi=80, bbox_inches=None)
     else:
         plt.show()
     

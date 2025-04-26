@@ -370,6 +370,50 @@ async def process_task_file(
     
     return results
 
+def print_statistics(results: Dict[str, Any]):
+    """
+    Print statistics about the results.
+    
+    Args:
+        results: Dictionary mapping task IDs to results
+    """
+    if not results:
+        print("No results to analyze")
+        return
+    
+    total_tasks = len(results)
+    
+    # Count tasks with valid programs
+    tasks_with_valid_programs = sum(1 for task_id, result in results.items() 
+                                  if result.get("valid_programs", 0) > 0)
+    
+    # Count tasks with correct test predictions
+    correct_test_tasks = sum(1 for task_id, result in results.items() 
+                           if result.get("test_correct", False))
+    
+    # Calculate percentages
+    valid_programs_pct = (tasks_with_valid_programs / total_tasks) * 100 if total_tasks > 0 else 0
+    correct_test_pct = (correct_test_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+    
+    # Calculate average number of valid programs per task
+    total_valid_programs = sum(result.get("valid_programs", 0) for result in results.values())
+    avg_valid_programs = total_valid_programs / total_tasks if total_tasks > 0 else 0
+    
+    # Print statistics
+    print("\n" + "=" * 60)
+    print("SUMMARY STATISTICS")
+    print("=" * 60)
+    print(f"Total tasks processed: {total_tasks}")
+    print(f"Tasks with valid programs: {tasks_with_valid_programs} ({valid_programs_pct:.1f}%)")
+    print(f"Tasks with correct test predictions: {correct_test_tasks} ({correct_test_pct:.1f}%)")
+    print(f"Average valid programs per task: {avg_valid_programs:.2f}")
+    
+    if total_tasks > 0:
+        print("\nTask success rates:")
+        print(f"  - pass@1 (equivalent): {correct_test_pct:.1f}%")
+    
+    print("=" * 60)
+
 async def main_async() -> int:
     """Main async function."""
     parser = argparse.ArgumentParser(description="Greenblatt-style ARC demo")
@@ -491,7 +535,7 @@ async def main_async() -> int:
             
         elif args.task_file:
             # Process multiple tasks from a file
-            await process_task_file(
+            results = await process_task_file(
                 task_file=args.task_file,
                 task_ids_file=args.task_file,
                 k=args.k,
@@ -506,6 +550,9 @@ async def main_async() -> int:
                 save_viz=args.save_viz,
                 max_tasks=args.max_tasks
             )
+            
+            # Print statistics
+            print_statistics(results)
         else:
             print("Error: Either --task-id, --task-file, or --debug must be specified")
             return 1
