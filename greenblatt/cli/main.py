@@ -25,7 +25,7 @@ from typing import List, Dict, Any, Optional
 from core.generate_programs import generate_programs_for_task, load_task_data, load_task_ids
 from core.evaluate import evaluate_task
 from viz.show_grids import visualize_task
-from sandbox.runner import cleanup
+from sandbox.runner import cleanup, set_use_local_executor
 
 async def process_single_task(
     task_data: Dict[str, Any],
@@ -372,72 +372,67 @@ async def process_task_file(
 
 async def main_async() -> int:
     """Main async function."""
-    parser = argparse.ArgumentParser(description="Greenblatt ARC Demo")
+    parser = argparse.ArgumentParser(description="Greenblatt-style ARC demo")
     
-    # Task selection
-    parser.add_argument("--task-id", type=str,
+    # Task options
+    task_group = parser.add_mutually_exclusive_group()
+    task_group.add_argument("--task-id", type=str,
                         help="Task ID to process")
-    parser.add_argument("--task-file", type=str,
+    task_group.add_argument("--task-file", type=str,
                         help="Path to task list file")
-    parser.add_argument("--debug", action="store_true",
-                        help="Debug mode")
+    task_group.add_argument("--debug", action="store_true",
+                        help="Debug mode with detailed logging")
     
-    # Data files
+    # Data options
     parser.add_argument("--data-file", type=str, default="../arc-data-cleaned/arc-agi_evaluation_challenges.json",
                         help="Path to data file")
     parser.add_argument("--solutions-file", type=str,
                         help="Path to solutions file")
     
-    # Generation parameters
+    # Generation options
     parser.add_argument("--k", type=int, default=8,
                         help="Number of programs to generate per task")
     parser.add_argument("--temperature", type=float, default=1.0,
-                        help="Temperature for generation (0.0-2.0)")
+                        help="Temperature for generation")
     parser.add_argument("--top-p", type=float, default=1.0,
-                        help="Top-p sampling parameter (0.0-1.0)")
+                        help="Top-p sampling parameter")
     parser.add_argument("--top-k", type=int, default=40,
-                        help="Top-k sampling parameter (1-100)")
+                        help="Top-k sampling parameter")
     parser.add_argument("--concurrency", type=int, default=32,
                         help="Number of concurrent API calls")
     
     # Output options
     parser.add_argument("--visualize", action="store_true",
-                        help="Visualize results")
+                        help="Visualize the results")
     parser.add_argument("--save-results", type=str,
                         help="Path to save results JSON")
     parser.add_argument("--save-viz", type=str,
                         help="Directory to save visualizations")
     parser.add_argument("--max-tasks", type=int,
                         help="Maximum number of tasks to process")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="Use local Python executor with AST-based security instead of MCP sandbox")
     
     args = parser.parse_args()
     
+    # Configure sandbox mode
+    set_use_local_executor(args.no_sandbox)
+    
     try:
-        if args.debug:
-            # Debug mode
-            await debug_task(
-                task_id=args.task_id,
-                data_file=args.data_file,
-                solutions_file=args.solutions_file,
-                k=args.k,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                top_k=args.top_k,
-                concurrency=args.concurrency,
-                save_results=args.save_results,
-                visualize=args.visualize,
-                save_viz=args.save_viz
-            )
-        elif args.task_id:
+        if args.task_id:
             # Process a single task
-            with open(args.data_file, 'r') as f:
-                task_data = json.load(f)
+            print(f"Processing task: {args.task_id}")
+            
+            # Load task data
+            task_data = load_task_data(args.data_file)
+            print(f"Loaded task data from {args.data_file}")
             
             # Load solutions data if provided
             solutions_data = {}
             if args.solutions_file:
                 with open(args.solutions_file, 'r') as f:
                     solutions_data = json.load(f)
+                print(f"Loaded solutions data from {args.solutions_file}")
             else:
                 # Try to find solutions file based on data file
                 if 'challenges' in args.data_file:
@@ -453,7 +448,8 @@ async def main_async() -> int:
                 save_dir = Path(args.save_viz)
                 save_dir.mkdir(parents=True, exist_ok=True)
             
-            await process_single_task(
+            # Process the task
+            result = await process_single_task(
                 task_data=task_data,
                 solutions_data=solutions_data,
                 task_id=args.task_id,
@@ -465,8 +461,36 @@ async def main_async() -> int:
                 visualize=args.visualize,
                 save_dir=save_dir
             )
+            
+            # Save results if requested
+            if args.save_results:
+                with open(args.save_results, 'w') as f:
+                    json.dump({args.task_id: result}, f, indent=2)
+                print(f"Saved results to {args.save_results}")
+            
+        elif args.debug:
+            # Debug mode
+            if not args.task_id:
+                print("Error: --task-id must be specified in debug mode")
+                return 1
+            
+            # Debug a single task
+            await debug_task(
+                task_id=args.task_id,
+                data_file=args.data_file,
+                solutions_file=args.solutions_file,
+                k=args.k,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                concurrency=args.concurrency,
+                save_results=args.save_results,
+                visualize=args.visualize,
+                save_viz=args.save_viz
+            )
+            
         elif args.task_file:
-            # Process tasks from a file
+            # Process multiple tasks from a file
             await process_task_file(
                 task_file=args.task_file,
                 task_ids_file=args.task_file,
@@ -484,7 +508,16 @@ async def main_async() -> int:
             )
         else:
             print("Error: Either --task-id, --task-file, or --debug must be specified")
-            sys.exit(1)
+            return 1
+            
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
     finally:
         # Clean up resources
         await cleanup()

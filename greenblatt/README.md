@@ -31,11 +31,6 @@ uv add httpx openai pydantic-ai-slim numpy matplotlib tqdm orjson ujson mcp
 OPENROUTER_API_KEY=your_api_key_here
 ```
 
-3. Start the MCP server in a separate terminal:
-```bash
-deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydantic/mcp-run-python stdio
-```
-
 ## Usage
 
 Run the main script from the `greenblatt` directory:
@@ -51,36 +46,9 @@ uv run --with mcp main.py --task-id <task_id> --k <num_programs> [--visualize]
 - `--temperature`: Temperature for generation (default: 1.0)
 - `--visualize`: Flag to visualize the task and solutions
 
-## Testing the MCP Sandbox
-
-To test the MCP sandbox functionality, run:
-```bash
-uv run --with mcp test-scripts/test_simplified_runner.py
-```
-
-This will execute a simple grid transformation in the MCP sandbox and verify the results.
-
-## Environment Setup
-
-### API Key
-
-The demo requires an OpenRouter API key to generate programs. You have two options to set this up:
-
-1. **Using a .env file (recommended)**:
-   - Copy the `sample.env` file to `.env` in the same directory
-   - Add your OpenRouter API key to the `.env` file
-   - The application will automatically load variables from this file
-
-2. **Setting environment variables directly**:
-   ```bash
-   export OPENROUTER_API_KEY='your-api-key'
-   ```
-
-You can get an API key by signing up at [OpenRouter](https://openrouter.ai/).
-
 ## MCP Server Setup
 
-Before running the demo, you need to set up the MCP server for sandboxed code execution in a separate terminal:
+Before running the demo with the default sandbox mode, you need to set up the MCP server for sandboxed code execution in a separate terminal:
 
 1. Install Deno if you don't have it already:
 ```bash
@@ -92,7 +60,31 @@ curl -fsSL https://deno.land/install.sh | sh
 deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydantic/mcp-run-python stdio
 ```
 
-**Important**: Keep this server running in a separate terminal while using the demo. The sandbox runner will connect to this server to execute the generated code safely.
+**Important**: Keep this server running in a separate terminal while using the demo with the default sandbox mode. The sandbox runner will connect to this server to execute the generated code safely.
+
+## Sandbox Options
+
+The system supports two different execution environments for running generated programs:
+
+### MCP Sandbox (Default)
+
+By default, the system uses the MCP sandbox for code execution, which provides strong isolation but requires a separate MCP server to be running (see MCP Server Setup above).
+
+### Local Executor (--no-sandbox)
+
+For faster execution, you can use the `--no-sandbox` flag to run code in a lightweight local executor:
+
+```bash
+uv run main.py --task-id 00576224 --k 8 --visualize --no-sandbox
+```
+
+The local executor:
+- Uses AST-based security to restrict imports and dangerous operations
+- Runs code directly in the Python process without the overhead of the MCP server
+- Is significantly faster than the MCP sandbox, especially for batch processing
+- Automatically handles type annotations from the generated code
+
+Note: The local executor is not a full sandbox and should only be used in trusted environments.
 
 ## Visualization
 
@@ -150,10 +142,6 @@ To manage costs:
   ```bash
   curl -fsSL https://deno.land/install.sh | sh
   ```
-- **MCP Server**: If the MCP server fails to start, try running it manually:
-  ```bash
-  deno run -A jsr:@pydantic/mcp-run-python sse --port 4321
-  ```
 - **Memory Issues**: If you encounter memory issues, reduce the `--k` value
 
 ## Examples
@@ -161,30 +149,19 @@ To manage costs:
 ### Example 1: Running on a Single Task
 
 ```bash
-uv run main.py --task-id 00576224 --k 8 --visualize
+uv run main.py --task-id 00576224 --k 8 --visualize --no-sandbox
 ```
 
 ### Example 2: Running on MIT-Easy Tasks
 
 ```bash
-uv run --with mcp main.py \
-  --task-file ../arc-data/mit-easy.json \
-  --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json \
-  --k 32 \
-  --concurrency 32 \
-  --save-results results/mit_easy_results.json \
-  --visualize \
-  --save-viz visualizations/mit_easy/
+uv run main.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --k 32 --concurrency 32 --save-results results/mit_easy_results.json --visualize --save-viz visualizations/mit_easy/ --no-sandbox
 ```
 
 ### Example 3: Custom Data File
 
 ```bash
-uv run main.py \
-  --task-id 00576224 \
-  --data-file ../arc-data-cleaned/arc-agi_training_challenges.json \
-  --k 8 \
-  --visualize
+uv run main.py --task-id 00576224 --data-file ../arc-data-cleaned/arc-agi_training_challenges.json --k 8 --visualize --no-sandbox
 ```
 
 ### Example 3: Analyzing Performance with Different k Values
@@ -192,13 +169,7 @@ uv run main.py \
 To analyze how performance varies with different values of k, you can use the `run_k_analysis.py` script:
 
 ```bash
-uv run --with mcp run_k_analysis.py \
-  --task-file ../arc-data/mit-easy.json \
-  --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json \
-  --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json \
-  --k-values 2,8,32 \
-  --concurrency 32 \
-  --output-dir results/k_analysis
+uv run run_k_analysis.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json --k-values 2,8,32 --concurrency 32 --output-dir results/k_analysis
 ```
 
 This will:

@@ -1,7 +1,8 @@
-"""runner.py – simplified wrapper around MCP:run-python
+"""runner.py – wrapper around MCP:run-python with local executor option
 
-Uses the MCP client with stdio transport to connect to a running Deno MCP server.
-Provides run_in_sandbox(code: str, inputs: list[list]) -> list[list]
+Uses either:
+1. MCP client with stdio transport to connect to a running Deno MCP server (default)
+2. Local Python executor with AST-based security for faster execution (with --no-sandbox flag)
 """
 import asyncio
 import json
@@ -10,6 +11,9 @@ import time
 from typing import List, Optional, Dict, Any, Tuple
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+# Import local executor
+from sandbox.local_executor import run_batch_programs_local, run_in_local_sandbox
 
 # Server parameters for the MCP Run Python server
 SERVER_PARAMS = StdioServerParameters(
@@ -27,6 +31,18 @@ SERVER_PARAMS = StdioServerParameters(
 
 # Global cache for storing results
 RESULT_CACHE: Dict[str, List[Optional[List[List[int]]]]] = {}
+
+# Global flag to control whether to use the local executor
+USE_LOCAL_EXECUTOR = False
+
+def set_use_local_executor(use_local: bool):
+    """Set whether to use the local executor instead of MCP sandbox."""
+    global USE_LOCAL_EXECUTOR
+    USE_LOCAL_EXECUTOR = use_local
+    if use_local:
+        print("Using local Python executor with AST-based security")
+    else:
+        print("Using MCP sandbox for code execution")
 
 def hash_input(input_grid: List[List[int]]) -> str:
     """Create a hash of an input grid for caching."""
@@ -56,6 +72,11 @@ async def run_in_sandbox(code: str, inputs: List[List[List[int]]], timeout: floa
     Returns:
         A list of output grids or None for each input if execution failed
     """
+    # Check if we should use the local executor
+    if USE_LOCAL_EXECUTOR:
+        # Use the local executor
+        return await run_in_local_sandbox(code, inputs)
+    
     # Check cache for all inputs
     all_cached = True
     results = [None] * len(inputs)
@@ -186,6 +207,11 @@ async def run_batch_programs(programs: List[str], inputs: List[List[List[int]]])
     Returns:
         Dictionary mapping program indices to their results
     """
+    # Check if we should use the local executor
+    if USE_LOCAL_EXECUTOR:
+        # Use the local executor for batch processing
+        return await run_batch_programs_local(programs, inputs)
+    
     print(f"Starting batch execution of {len(programs)} programs on {len(inputs)} inputs at {time.strftime('%H:%M:%S')}")
     start_time = time.time()
     
