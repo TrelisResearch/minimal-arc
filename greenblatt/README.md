@@ -155,7 +155,7 @@ uv run main.py --task-id 00576224 --k 8 --visualize --no-sandbox
 ### Example 2: Running on MIT-Easy Tasks
 
 ```bash
-uv run main.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --k 32 --concurrency 32 --save-results results/mit_easy_results.json --visualize --save-viz visualizations/mit_easy/ --no-sandbox
+uv run main.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --k 128 --concurrency 128 --save-results results/mit_easy_results.json --visualize --save-viz visualizations/mit_easy/ --no-sandbox
 ```
 
 ### Example 3: Custom Data File
