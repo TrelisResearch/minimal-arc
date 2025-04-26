@@ -87,14 +87,14 @@ class LocalPythonExecutor:
         return globals_dict
 
 
-async def run_in_local_sandbox(code: str, inputs: List[List[List[int]]], timeout: float = 30.0, debug: bool = False) -> List[Optional[List[List[int]]]]:
+async def run_in_local_sandbox(code: str, inputs: List[List[List[int]]], timeout: float = 1.5, debug: bool = False) -> List[Optional[List[List[int]]]]:
     """
     Run the provided code in the local executor and return the results.
     
     Args:
         code: The Python code string containing a solve function
         inputs: A list of input grids to test
-        timeout: Maximum execution time in seconds per input
+        timeout: Maximum execution time in seconds (default: 1.5s)
         debug: Whether to print debug information
         
     Returns:
@@ -172,13 +172,13 @@ async def run_batch_programs_local(programs: List[str], inputs: List[List[List[i
     # Process each program individually
     results = {}
     for i, program in enumerate(programs):
-        print(f"Executing program {i} locally with 30s timeout at {time.strftime('%H:%M:%S')}...")
+        print(f"Executing program {i} locally with 1.5s timeout at {time.strftime('%H:%M:%S')}...")
         execution_start = time.time()
         
         try:
             # Use debug mode for the first program to help diagnose issues
             debug_mode = (i == 0)
-            program_results = await run_in_local_sandbox(program, inputs, timeout=30.0, debug=debug_mode)
+            program_results = await run_in_local_sandbox(program, inputs, timeout=1.5, debug=debug_mode)
             execution_time = time.time() - execution_start
             print(f"Program {i} execution completed in {execution_time:.2f}s")
             

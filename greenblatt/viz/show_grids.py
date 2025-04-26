@@ -7,6 +7,7 @@ Draws: input(s), expected output(s), candidate LLM output
 import json
 import sys
 import argparse
+import time
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Union
 import numpy as np
@@ -27,9 +28,8 @@ ARC_COLORS = [
     "#870C25",  # 9: Brown
 ]
 
-def create_arc_colormap():
-    """Create a colormap for ARC grids."""
-    return ListedColormap(ARC_COLORS)
+# Create the colormap once
+ARC_COLORMAP = ListedColormap(ARC_COLORS)
 
 def pad_grid(grid: List[List[int]], max_rows: int, max_cols: int) -> np.ndarray:
     """Pad a grid to the specified dimensions."""
@@ -43,12 +43,16 @@ def pad_grid(grid: List[List[int]], max_rows: int, max_cols: int) -> np.ndarray:
     
     return grid_array
 
-def plot_grid(ax, grid: List[List[int]], title: str = None):
+def plot_grid(ax, grid: Union[List[List[int]], np.ndarray], title: str = None):
     """Plot a single grid on the given axis."""
-    grid_array = np.array(grid, dtype=np.int8)
+    # Convert to numpy array if not already
+    if not isinstance(grid, np.ndarray):
+        grid_array = np.array(grid, dtype=np.int8)
+    else:
+        grid_array = grid
     
-    # Plot the grid
-    ax.imshow(grid_array, cmap=create_arc_colormap(), vmin=0, vmax=9)
+    # Plot the grid using the global colormap
+    ax.imshow(grid_array, cmap=ARC_COLORMAP, vmin=0, vmax=9)
     
     # Add grid lines
     ax.grid(color='black', linestyle='-', linewidth=0.5)
@@ -70,11 +74,18 @@ def plot_grid(ax, grid: List[List[int]], title: str = None):
     # Turn off axis
     ax.axis('off')
 
-def grid_equals(grid1: List[List[int]], grid2: List[List[int]]) -> bool:
+def grid_equals(grid1: Union[List[List[int]], np.ndarray], grid2: Union[List[List[int]], np.ndarray]) -> bool:
     """Check if two grids are equal."""
-    # Convert to numpy arrays for comparison
-    array1 = np.array(grid1)
-    array2 = np.array(grid2)
+    # Convert to numpy arrays for comparison if not already
+    if not isinstance(grid1, np.ndarray):
+        array1 = np.array(grid1)
+    else:
+        array1 = grid1
+        
+    if not isinstance(grid2, np.ndarray):
+        array2 = np.array(grid2)
+    else:
+        array2 = grid2
     
     # Check if shapes match
     if array1.shape != array2.shape:
@@ -104,27 +115,54 @@ def visualize_task(
         save_path: Optional path to save the visualization
         training_predictions: Optional dictionary mapping programs to their training predictions
     """
+    viz_start_time = time.time()
+    
+    # Convert all grids to numpy arrays upfront to avoid repeated conversions
     train_examples = task_data[task_id]["train"]
     test_examples = task_data[task_id]["test"]
     
+    # Pre-convert all grids to numpy arrays
+    for example in train_examples:
+        example["input_array"] = np.array(example["input"], dtype=np.int8)
+        example["output_array"] = np.array(example["output"], dtype=np.int8)
+    
+    for example in test_examples:
+        example["input_array"] = np.array(example["input"], dtype=np.int8)
+        if "output" in example:
+            example["output_array"] = np.array(example["output"], dtype=np.int8)
+    
+    # Convert candidate output if provided
+    candidate_output_array = None
+    if candidate_output is not None:
+        candidate_output_array = np.array(candidate_output, dtype=np.int8)
+    
     # Get ground truth for test examples from solutions data if available
     test_ground_truth = {}
+    test_ground_truth_arrays = {}
     if task_id in solutions_data:
         # The solutions data is just an array of outputs
         if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
             for i, solution in enumerate(solutions_data[task_id]):
                 if i < len(test_examples):
                     test_ground_truth[i] = solution
+                    test_ground_truth_arrays[i] = np.array(solution, dtype=np.int8)
     
     # Check if we have valid programs and training predictions
     has_training_predictions = False
     program_training_outputs = []
+    program_training_arrays = []
     
     if valid_programs and len(valid_programs) > 0 and training_predictions:
         # Use the first valid program's training predictions
         first_valid_program = valid_programs[0]
         if first_valid_program in training_predictions:
             program_training_outputs = training_predictions[first_valid_program]
+            # Pre-convert training predictions to numpy arrays
+            for output in program_training_outputs:
+                if output is not None:
+                    program_training_arrays.append(np.array(output, dtype=np.int8))
+                else:
+                    program_training_arrays.append(None)
             has_training_predictions = len(program_training_outputs) > 0
     
     # Determine the number of rows in the figure
@@ -145,20 +183,20 @@ def visualize_task(
     
     # Plot training examples
     for i, example in enumerate(train_examples):
-        plot_grid(axes[i][0], example["input"], f"Train {i+1} Input")
-        plot_grid(axes[i][1], example["output"], f"Train {i+1} Expected Output")
+        plot_grid(axes[i][0], example["input_array"], f"Train {i+1} Input")
+        plot_grid(axes[i][1], example["output_array"], f"Train {i+1} Expected Output")
         
         # If we have training predictions, show them
-        if has_training_predictions and i < len(program_training_outputs) and program_training_outputs[i] is not None:
+        if has_training_predictions and i < len(program_training_arrays) and program_training_arrays[i] is not None:
             # Check if prediction matches expected output
-            is_correct = grid_equals(program_training_outputs[i], example["output"])
+            is_correct = np.array_equal(program_training_arrays[i], example["output_array"])
             
             # Add a title that indicates correctness
             title = f"Train {i+1} Prediction"
             title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
-            plot_grid(axes[i][2], program_training_outputs[i], title)
+            plot_grid(axes[i][2], program_training_arrays[i], title)
             
             # Add a colored border
             border_color = 'green' if is_correct else 'red'
@@ -176,16 +214,16 @@ def visualize_task(
     # Plot test examples
     for i, example in enumerate(test_examples):
         row_idx = len(train_examples) + i
-        plot_grid(axes[row_idx][0], example["input"], f"Test {i+1} Input")
+        plot_grid(axes[row_idx][0], example["input_array"], f"Test {i+1} Input")
         
         # Check if we have ground truth from solutions data
         ground_truth_available = i in test_ground_truth
         
         # Always show the expected output column for test examples
         if ground_truth_available:
-            plot_grid(axes[row_idx][1], test_ground_truth[i], f"Test {i+1} Ground Truth")
-        elif "output" in example:
-            plot_grid(axes[row_idx][1], example["output"], f"Test {i+1} Expected Output")
+            plot_grid(axes[row_idx][1], test_ground_truth_arrays[i], f"Test {i+1} Ground Truth")
+        elif "output_array" in example:
+            plot_grid(axes[row_idx][1], example["output_array"], f"Test {i+1} Expected Output")
         else:
             axes[row_idx][1].text(0.5, 0.5, "Ground Truth Not Available", 
                                  horizontalalignment='center', verticalalignment='center',
@@ -193,48 +231,50 @@ def visualize_task(
             axes[row_idx][1].axis('on')
         
         # If we have a candidate output
-        if candidate_output is not None:
+        if candidate_output_array is not None:
             # Determine if the candidate output is correct (if ground truth is available)
             is_correct = False
             if ground_truth_available:
-                is_correct = grid_equals(candidate_output, test_ground_truth[i])
-            elif "output" in example:
-                is_correct = grid_equals(candidate_output, example["output"])
+                is_correct = np.array_equal(candidate_output_array, test_ground_truth_arrays[i])
+            elif "output_array" in example:
+                is_correct = np.array_equal(candidate_output_array, example["output_array"])
             
-            # Add a title that indicates correctness
-            title = f"Test {i+1} Prediction"
-            if ground_truth_available or "output" in example:
+            # Add a title that indicates correctness if we know
+            title = f"Test {i+1} Candidate Output"
+            if ground_truth_available or "output_array" in example:
                 title += f" ({'✓' if is_correct else '✗'})"
             
             # Plot with a green or red border based on correctness
-            plot_grid(axes[row_idx][2], candidate_output, title)
+            plot_grid(axes[row_idx][2], candidate_output_array, title)
             
-            # Add a colored border if we know whether it's correct
-            if ground_truth_available or "output" in example:
+            # Add a colored border if we know correctness
+            if ground_truth_available or "output_array" in example:
                 border_color = 'green' if is_correct else 'red'
                 for spine in axes[row_idx][2].spines.values():
                     spine.set_edgecolor(border_color)
                     spine.set_linewidth(3)
                 axes[row_idx][2].set_frame_on(True)
         else:
-            axes[row_idx][2].text(0.5, 0.5, "No Valid Programs", 
-                                 horizontalalignment='center', verticalalignment='center',
-                                 transform=axes[row_idx][2].transAxes)
-            axes[row_idx][2].axis('on')
+            axes[row_idx][2].axis('off')
         
-        # Turn off the last column for test examples
+        # Turn off the last column if we're using 4 columns
         if n_cols == 4:
             axes[row_idx][3].axis('off')
     
     # Adjust layout
-    plt.tight_layout(rect=[0, 0, 1, 0.96])  # Leave space for the title
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     
     # Save or show the figure
     if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close(fig)  # Close the figure to free memory
+        plt.savefig(save_path, dpi=100, bbox_inches='tight')
     else:
         plt.show()
+    
+    # Close the figure to free memory
+    plt.close(fig)
+    
+    viz_time = time.time() - viz_start_time
+    print(f"Visualization completed in {viz_time:.2f}s")
 
 def load_task_data(task_file: str) -> Dict[str, Any]:
     """Load task data from a JSON file."""

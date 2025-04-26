@@ -303,11 +303,11 @@ print(json.dumps(results))
                     
                     # Execute the code in the sandbox with timeout
                     try:
-                        print(f"Executing program {i} in sandbox with 30s timeout at {time.strftime('%H:%M:%S')}...")
+                        print(f"Executing program {i} in sandbox with 1.5s timeout at {time.strftime('%H:%M:%S')}...")
                         execution_start = time.time()
                         result = await asyncio.wait_for(
                             session.call_tool('run_python_code', {'python_code': program_code}),
-                            timeout=30
+                            timeout=1.5
                         )
                         execution_time = time.time() - execution_start
                         print(f"Program {i} execution completed in {execution_time:.2f}s")
@@ -363,7 +363,7 @@ print(json.dumps(results))
                             
                     except asyncio.TimeoutError:
                         execution_time = time.time() - execution_start
-                        print(f"Program {i} execution timed out after {execution_time:.2f}s (timeout was 30s)")
+                        print(f"Program {i} execution timed out after {execution_time:.2f}s (timeout was 1.5s)")
                         # Results remain as None for this program
                         
                     except Exception as e:

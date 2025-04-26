@@ -147,10 +147,17 @@ async def sample_programs(
                         print(f"Token usage: {response.usage}")
                     
                     # Extract and validate code from responses
+                    valid_code_found = False
                     for choice in response.choices:
                         code = extract_code(choice.message.content)
                         if code and is_valid_python(code):
+                            valid_code_found = True
                             await queue.put(code)
+                    
+                    # If no valid code was found, signal completion anyway
+                    if not valid_code_found:
+                        print(f"DEBUG: No valid code found in response, putting None in queue")
+                        await queue.put(None)
                     
                     # Signal completion
                     return
@@ -170,37 +177,73 @@ async def sample_programs(
                         await asyncio.sleep(wait_time)
                     else:
                         print(f"Failed after {max_retries} attempts")
+                        print(f"DEBUG: Task failed, putting None in queue")
                         await queue.put(None)  # Signal failure
                         return
         
         # If we get here, all retries failed
+        print(f"DEBUG: All retries failed, putting None in queue")
         await queue.put(None)  # Signal failure
     
     # Create tasks for API calls
     tasks = []
-    for _ in range(k):
+    for i in range(k):
         task = asyncio.create_task(sample_program_with_backoff())
         tasks.append(task)
     
-    # Process completed programs as they arrive
-    remaining = k
-    while remaining > 0:
-        program = await queue.get()
-        if program is not None:
-            yield program
-            remaining -= 1
-        else:
-            # If we got None, it means a task failed
-            # We'll just decrement remaining to account for it
-            remaining -= 1
+    # Add a background task to monitor the state
+    async def monitor_state():
+        while True:
+            # Check task status
+            done_tasks = sum(1 for t in tasks if t.done())
+            pending_tasks = len(tasks) - done_tasks
+            
+            # Check queue size (approximate)
+            queue_size = queue.qsize() if hasattr(queue, 'qsize') else "unknown"
+            
+            print(f"DEBUG: State - remaining: {remaining}, done_tasks: {done_tasks}/{len(tasks)}, queue_size: {queue_size}")
+            
+            await asyncio.sleep(5)
     
-    # Cancel any remaining tasks
-    for task in tasks:
-        if not task.done():
-            task.cancel()
+    monitor_task = asyncio.create_task(monitor_state())
+    
+    try:
+        # Process completed programs as they arrive
+        remaining = k
+        while remaining > 0:
+            try:
+                print(f"DEBUG: Waiting for item from queue, remaining: {remaining}")
+                program = await queue.get()
+                print(f"DEBUG: Got item from queue: {'valid program' if program else 'None'}")
+                
+                if program is not None:
+                    yield program
+                    remaining -= 1
+                    print(f"DEBUG: Yielded program, remaining: {remaining}")
+                else:
+                    remaining -= 1
+                    print(f"DEBUG: Got None, remaining: {remaining}")
+            except Exception as e:
+                print(f"DEBUG: Error in queue.get(): {e}")
+                # Decrement remaining to avoid infinite loop
+                remaining -= 1
+                print(f"DEBUG: Error handling, remaining: {remaining}")
+        
+        print(f"DEBUG: Exited collection loop, remaining: {remaining}")
+    finally:
+        # Cancel the monitor task
+        monitor_task.cancel()
+        
+        # Cancel any remaining tasks
+        for task in tasks:
+            if not task.done():
+                print(f"DEBUG: Cancelling unfinished task")
+                task.cancel()
     
     # Wait for all tasks to complete
+    print(f"DEBUG: Waiting for all tasks to complete")
     await asyncio.gather(*tasks, return_exceptions=True)
+    print(f"DEBUG: All tasks completed")
 
 async def sample_programs_with_usage(
     prompt: str, 
