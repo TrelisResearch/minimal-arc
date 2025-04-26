@@ -60,21 +60,40 @@ def build_prompt(task_data: Dict[str, Any], task_id: str) -> str:
     return prompt
 
 def extract_code(response: str) -> Optional[str]:
-    """Extract code from the response, handling markdown code blocks."""
+    """Extract code from the response, handling markdown code blocks and thinking steps."""
+    # Extract thinking steps if present
+    thinking = ""
+    if "<think>" in response and "</think>" in response:
+        think_parts = response.split("<think>", 1)
+        if len(think_parts) > 1:
+            thinking_content = think_parts[1].split("</think>", 1)[0].strip()
+            thinking = thinking_content
+            # Remove the thinking part from the response for code extraction
+            response = response.replace(f"<think>{thinking_content}</think>", "").strip()
+    
     # Try to extract code from markdown code blocks
+    code_part = None
     if "```python" in response:
         parts = response.split("```python", 1)
         if len(parts) > 1:
             code_part = parts[1].split("```", 1)[0].strip()
-            return code_part
     elif "```" in response:
         parts = response.split("```", 1)
         if len(parts) > 1:
             code_part = parts[1].split("```", 1)[0].strip()
-            return code_part
+    else:
+        # If no code blocks found, use the whole response
+        code_part = response.strip()
     
-    # If no code blocks found, use the whole response
-    return response.strip()
+    # If we have a code part and thinking, combine them
+    if code_part:
+        if thinking:
+            # Format thinking as a multiline comment block at the top of the code
+            formatted_thinking = "\n".join([f"# {line}" for line in thinking.split("\n")])
+            return f"# THINKING START\n{formatted_thinking}\n# THINKING END\n\n{code_part}"
+        return code_part
+    
+    return None
 
 def is_valid_python(code: str) -> bool:
     """Check if the code is valid Python syntax."""
