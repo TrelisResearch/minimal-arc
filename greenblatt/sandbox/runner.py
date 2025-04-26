@@ -28,15 +28,6 @@ SERVER_PARAMS = StdioServerParameters(
 # Global cache for storing results
 RESULT_CACHE: Dict[str, List[Optional[List[List[int]]]]] = {}
 
-# Global default timeout
-DEFAULT_TIMEOUT = 3.0
-
-def set_default_timeout(timeout: float):
-    """Set the default timeout for sandbox execution."""
-    global DEFAULT_TIMEOUT
-    print(f"Setting default sandbox timeout to {timeout}s")
-    DEFAULT_TIMEOUT = timeout
-
 def hash_input(input_grid: List[List[int]]) -> str:
     """Create a hash of an input grid for caching."""
     return hashlib.md5(json.dumps(input_grid).encode()).hexdigest()
@@ -184,29 +175,17 @@ print(json.dumps(results))
         print(f"MCP execution error: {e}")
         return [None] * len(inputs)
 
-async def run_batch_programs(programs: List[str], inputs: List[List[List[int]]], timeout: float = None) -> Dict[str, List[Optional[List[List[int]]]]]:
+async def run_batch_programs(programs: List[str], inputs: List[List[List[int]]]) -> Dict[str, List[Optional[List[List[int]]]]]:
     """
-    Run multiple programs in a single sandbox call.
+    Run multiple programs in a single sandbox session, but execute each program individually.
     
     Args:
         programs: List of Python code strings containing solve functions
         inputs: A list of input grids to test
-        timeout: Maximum execution time in seconds (default is None, which uses DEFAULT_TIMEOUT)
         
     Returns:
         Dictionary mapping program indices to their results
     """
-    # Use default timeout if none provided
-    if timeout is None:
-        timeout = DEFAULT_TIMEOUT
-    
-    # Calculate dynamic timeout based on number of programs
-    # Use min(timeout, 1.5 * number_of_programs) to prevent excessive timeouts
-    dynamic_timeout = min(timeout, 1.5 * len(programs)) if len(programs) > 0 else timeout
-    if dynamic_timeout != timeout:
-        print(f"Adjusting timeout from {timeout:.1f}s to {dynamic_timeout:.1f}s based on {len(programs)} programs")
-        timeout = dynamic_timeout
-    
     print(f"Starting batch execution of {len(programs)} programs on {len(inputs)} inputs at {time.strftime('%H:%M:%S')}")
     start_time = time.time()
     
@@ -239,57 +218,6 @@ async def run_batch_programs(programs: List[str], inputs: List[List[List[int]]],
         print("All results found in cache, skipping sandbox execution")
         return results
     
-    print("Preparing batch code...")
-    code_start_time = time.time()
-    # Prepare the full code with all programs combined
-    full_code = """
-# /// script
-# dependencies = []
-# ///
-
-import json
-import traceback
-import time
-
-"""
-    
-    # Add each program with a unique solve function name
-    for i, program in enumerate(programs):
-        # Rename the solve function to avoid conflicts
-        renamed_program = program.replace("def solve(", f"def solve_{i}(")
-        full_code += f"\n# Program {i}\n{renamed_program}\n"
-    
-    # Add code to run all programs on all inputs
-    full_code += f"""
-# Run all programs on all inputs
-inputs = {json.dumps(inputs)}
-results = {{}}
-
-for prog_idx in range({len(programs)}):
-    solve_func = globals().get(f"solve_{{prog_idx}}")
-    if solve_func:
-        prog_results = []
-        for inp_idx, inp in enumerate(inputs):
-            try:
-                start_time = time.time()
-                result = solve_func(inp)
-                elapsed = time.time() - start_time
-                if elapsed > 0.1:  # Log slow executions
-                    print(f"Program {{prog_idx}} on input {{inp_idx}} took {{elapsed:.2f}}s")
-                prog_results.append(result)
-            except Exception as e:
-                print(f"Error in program {{prog_idx}} on input {{inp_idx}}: {{e}}")
-                traceback.print_exc()
-                prog_results.append(None)
-        results[prog_idx] = prog_results
-
-# Output results as JSON
-print(json.dumps(results))
-"""
-    
-    code_time = time.time() - code_start_time
-    print(f"Code preparation completed in {code_time:.2f}s")
-    
     print(f"Connecting to MCP server at {time.strftime('%H:%M:%S')}...")
     connect_start_time = time.time()
     try:
@@ -306,97 +234,119 @@ print(json.dumps(results))
                 init_time = time.time() - init_start_time
                 print(f"Session initialized in {init_time:.2f}s")
                 
-                # Execute the code in the sandbox with timeout
-                try:
-                    print(f"Executing batch code in sandbox with {timeout}s timeout at {time.strftime('%H:%M:%S')}...")
-                    execution_start = time.time()
-                    result = await asyncio.wait_for(
-                        session.call_tool('run_python_code', {'python_code': full_code}),
-                        timeout=timeout
-                    )
-                    execution_time = time.time() - execution_start
-                    print(f"Sandbox execution completed in {execution_time:.2f}s")
+                # Execute each program individually using the same session
+                for i, program in enumerate(programs):
+                    # Skip if all results for this program are already cached
+                    if all(results[i][j] is not None for j in range(len(inputs))):
+                        print(f"Program {i} results all cached, skipping execution")
+                        continue
                     
-                    # Get the output text
-                    output_text = result.content[0].text
+                    print(f"Preparing code for program {i}...")
+                    # Prepare the code for this program
+                    program_code = f"""
+# /// script
+# dependencies = []
+# ///
+
+{program}
+
+import json
+import traceback
+import time
+
+# Run tests on the provided inputs
+inputs = {json.dumps(inputs)}
+results = []
+
+for inp_idx, inp in enumerate(inputs):
+    try:
+        start_time = time.time()
+        result = solve(inp)
+        elapsed = time.time() - start_time
+        if elapsed > 0.1:  # Log slow executions
+            print(f"Input {{inp_idx}} took {{elapsed:.2f}}s")
+        results.append(result)
+    except Exception as e:
+        print(f"Error on input {{inp_idx}}: {{e}}")
+        traceback.print_exc()
+        results.append(None)
+
+# Output results as JSON
+print(json.dumps(results))
+"""
                     
-                    # Parse the output to extract the JSON results
+                    # Execute the code in the sandbox with timeout
                     try:
-                        print(f"Parsing sandbox output at {time.strftime('%H:%M:%S')}...")
-                        parse_start_time = time.time()
-                        # Look for JSON dictionary in the output
-                        for line in output_text.splitlines():
-                            line = line.strip()
-                            if line.startswith('{') and line.endswith('}'):
-                                parsed_results = json.loads(line)
-                                
-                                # Convert string keys to integers
-                                parsed_results = {int(k): v for k, v in parsed_results.items()}
-                                
+                        print(f"Executing program {i} in sandbox with 30s timeout at {time.strftime('%H:%M:%S')}...")
+                        execution_start = time.time()
+                        result = await asyncio.wait_for(
+                            session.call_tool('run_python_code', {'python_code': program_code}),
+                            timeout=30
+                        )
+                        execution_time = time.time() - execution_start
+                        print(f"Program {i} execution completed in {execution_time:.2f}s")
+                        
+                        # Get the output text
+                        output_text = result.content[0].text
+                        
+                        # Parse the output to extract the JSON results
+                        try:
+                            # Look for JSON array in the output
+                            program_results = None
+                            for line in output_text.splitlines():
+                                line = line.strip()
+                                if line.startswith('[') and line.endswith(']'):
+                                    program_results = json.loads(line)
+                                    break
+                            
+                            # If we couldn't find a JSON array, check for output tags
+                            if program_results is None and "<o>" in output_text:
+                                output_start = output_text.find("<o>") + len("<o>")
+                                output_end = output_text.find("</o>")
+                                if output_start >= 0 and output_end >= 0:
+                                    output_content = output_text[output_start:output_end].strip()
+                                    
+                                    # Look for JSON array in the output content
+                                    for line in output_content.splitlines():
+                                        line = line.strip()
+                                        if line.startswith('[') and line.endswith(']'):
+                                            program_results = json.loads(line)
+                                            break
+                            
+                            # Check for errors
+                            if program_results is None and "<e>" in output_text:
+                                error_start = output_text.find("<e>") + len("<e>")
+                                error_end = output_text.find("</e>")
+                                if error_start >= 0 and error_end >= 0:
+                                    error_content = output_text[error_start:error_end].strip()
+                                    print(f"Execution error for program {i}: {error_content}")
+                            
+                            # Store and cache results if found
+                            if program_results:
+                                results[i] = program_results
                                 # Cache individual results
-                                print(f"Caching results for {len(parsed_results)} programs...")
-                                for prog_idx, prog_results in parsed_results.items():
-                                    for input_idx, result in enumerate(prog_results):
-                                        if result is not None:
-                                            RESULT_CACHE[cache_keys[prog_idx][input_idx]] = result
+                                for input_idx, result in enumerate(program_results):
+                                    if result is not None:
+                                        RESULT_CACHE[cache_keys[i][input_idx]] = result
+                            else:
+                                print(f"Could not parse output for program {i}: {output_text[:200]}...")
                                 
-                                parse_time = time.time() - parse_start_time
-                                print(f"Output parsing completed in {parse_time:.2f}s")
-                                
-                                total_time = time.time() - start_time
-                                print(f"Batch execution completed in {total_time:.2f}s")
-                                return parsed_results
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing JSON output for program {i}: {e}")
+                            # Program results remain as None for this program
+                            
+                    except asyncio.TimeoutError:
+                        execution_time = time.time() - execution_start
+                        print(f"Program {i} execution timed out after {execution_time:.2f}s (timeout was 30s)")
+                        # Results remain as None for this program
                         
-                        # If we couldn't find a JSON dictionary, check for output tags
-                        if "<o>" in output_text:
-                            output_start = output_text.find("<o>") + len("<o>")
-                            output_end = output_text.find("</o>")
-                            if output_start >= 0 and output_end >= 0:
-                                output_content = output_text[output_start:output_end].strip()
-                                
-                                # Look for JSON dictionary in the output content
-                                for line in output_content.splitlines():
-                                    line = line.strip()
-                                    if line.startswith('{') and line.endswith('}'):
-                                        parsed_results = json.loads(line)
-                                        
-                                        # Convert string keys to integers
-                                        parsed_results = {int(k): v for k, v in parsed_results.items()}
-                                        
-                                        # Cache individual results
-                                        print(f"Caching results for {len(parsed_results)} programs...")
-                                        for prog_idx, prog_results in parsed_results.items():
-                                            for input_idx, result in enumerate(prog_results):
-                                                if result is not None:
-                                                    RESULT_CACHE[cache_keys[prog_idx][input_idx]] = result
-                                        
-                                        parse_time = time.time() - parse_start_time
-                                        print(f"Output parsing completed in {parse_time:.2f}s")
-                                        
-                                        total_time = time.time() - start_time
-                                        print(f"Batch execution completed in {total_time:.2f}s")
-                                        return parsed_results
-                        
-                        # Check for errors
-                        if "<e>" in output_text:
-                            error_start = output_text.find("<e>") + len("<e>")
-                            error_end = output_text.find("</e>")
-                            if error_start >= 0 and error_end >= 0:
-                                error_content = output_text[error_start:error_end].strip()
-                                print(f"Execution error: {error_content}")
-                        
-                        # If we couldn't extract results, return empty results
-                        print(f"Could not parse output: {output_text[:200]}...")
-                        return {i: [None] * len(inputs) for i in range(len(programs))}
-                        
-                    except json.JSONDecodeError as e:
-                        print(f"Error parsing JSON output: {e}")
-                        return {i: [None] * len(inputs) for i in range(len(programs))}
-                        
-                except asyncio.TimeoutError:
-                    execution_time = time.time() - execution_start
-                    print(f"Execution timed out after {execution_time:.2f}s (timeout was {timeout}s)")
-                    return {i: [None] * len(inputs) for i in range(len(programs))}
+                    except Exception as e:
+                        print(f"Error executing program {i}: {e}")
+                        # Results remain as None for this program
+                
+                total_time = time.time() - start_time
+                print(f"Batch execution completed in {total_time:.2f}s")
+                return results
     
     except Exception as e:
         connect_time = time.time() - connect_start_time

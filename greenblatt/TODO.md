@@ -3,17 +3,11 @@
 ## Testing and Performance Optimization
 
 ### Sandbox Execution Robustness (Priority #1)
-- [ ] Improve sandbox execution robustness
-  - Add per-program timeouts within the batch execution loop
+- [x] Improve sandbox execution robustness
+  - Ensure that a single problematic program cannot cause the entire batch to fail. This is best done by removing the looping and calling run_python... for each program (using the same session for the same batch).
   - Implement graceful failure handling for individual programs without affecting the entire batch
-  - Ensure that a single problematic program cannot cause the entire batch to fail
-
-### Timeout Handling
-- [ ] Improve timeout diagnostics
-  - Add progress tracking during program generation
-  - Implement periodic status updates for long-running operations
-  - Create a mechanism to capture and report the current state when a timeout occurs
-  - Allow tasks to gracefully report their state before being terminated
+  - Add per-program timeouts within the batch execution loop
+  - Remove all other timeouts because I don't understand their purpose.
 
 ### Unit Testing
 - [ ] Write unit tests for the evaluation step
@@ -35,9 +29,3 @@
   - Remove excessive logging statements
   - Consolidate timeout parameters to a configuration file
   - Document the timeout strategy in the README
-
-## Documentation
-- [ ] Update documentation with performance considerations
-  - Document the optimal batch sizes for different scenarios
-  - Provide guidelines for timeout settings
-  - Explain the caching mechanism and how to use it effectively

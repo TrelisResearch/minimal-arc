@@ -37,8 +37,7 @@ async def evaluate_programs_batch(
     programs: List[str],
     train_examples: List[Dict[str, List[List[int]]]],
     test_input: List[List[int]],
-    code_hashes: Set[str] = None,
-    timeout: float = 30.0  # Add timeout parameter with default of 30 seconds
+    code_hashes: Set[str] = None
 ) -> Dict[str, Any]:
     """
     Evaluate all programs against training examples and test input in a single batch.
@@ -48,7 +47,6 @@ async def evaluate_programs_batch(
         train_examples: List of training examples with 'input' and 'output' keys
         test_input: Test input grid
         code_hashes: Set of code hashes for deduplication
-        timeout: Maximum time to wait for evaluation (in seconds)
         
     Returns:
         Dictionary with evaluation results including valid programs and their outputs
@@ -86,29 +84,13 @@ async def evaluate_programs_batch(
     expected_outputs = [example["output"] for example in train_examples]
     all_inputs = train_inputs + [test_input]
     
-    # Run all programs on all inputs in a single batch with timeout
+    # Run all programs on all inputs in a single batch
     print(f"Running batch execution at {time.strftime('%H:%M:%S')}...")
     batch_exec_start = time.time()
     
-    try:
-        print(f"Running batch execution with {timeout}s timeout...")
-        batch_results = await asyncio.wait_for(
-            run_batch_programs(unique_programs, all_inputs, timeout=timeout),
-            timeout=timeout
-        )
-        batch_exec_time = time.time() - batch_exec_start
-        print(f"Batch execution completed in {batch_exec_time:.2f}s")
-    except asyncio.TimeoutError:
-        batch_exec_time = time.time() - batch_exec_start
-        print(f"Batch execution timed out after {batch_exec_time:.2f}s")
-        # Return empty results if timeout occurs
-        return {
-            "valid_programs": [],
-            "training_predictions": {},
-            "test_predictions": {},
-            "first_program_test_output": None,
-            "timed_out": True
-        }
+    batch_results = await run_batch_programs(unique_programs, all_inputs)
+    batch_exec_time = time.time() - batch_exec_start
+    print(f"Batch execution completed in {batch_exec_time:.2f}s")
     
     # Process the batch results
     print(f"Processing results for {len(programs)} programs...")
@@ -180,8 +162,7 @@ async def evaluate_programs_batch(
 
 async def majority_vote(
     valid_programs: List[str],
-    test_predictions: Dict[str, List[List[int]]],
-    timeout: float = 5.0  # Add timeout parameter
+    test_predictions: Dict[str, List[List[int]]]
 ) -> Optional[List[List[int]]]:
     """
     Take the majority vote of all valid programs' test predictions.
@@ -189,7 +170,6 @@ async def majority_vote(
     Args:
         valid_programs: List of valid Python code strings
         test_predictions: Dictionary mapping programs to their test predictions
-        timeout: Maximum time to wait for voting (in seconds)
         
     Returns:
         The majority output grid or None if no valid output
@@ -197,13 +177,7 @@ async def majority_vote(
     if not valid_programs:
         return None
     
-    # Use a timeout to prevent hanging
-    try:
-        # This operation is mostly CPU-bound, but we'll add a timeout just in case
-        return await asyncio.wait_for(_majority_vote_impl(valid_programs, test_predictions), timeout)
-    except asyncio.TimeoutError:
-        print(f"Majority voting timed out after {timeout} seconds")
-        return None
+    return await _majority_vote_impl(valid_programs, test_predictions)
 
 async def _majority_vote_impl(valid_programs: List[str], test_predictions: Dict[str, List[List[int]]]) -> Optional[List[List[int]]]:
     """Implementation of majority voting without timeout handling."""
@@ -230,8 +204,7 @@ async def evaluate_task(
     task_data: Dict[str, Any], 
     solutions_data: Dict[str, Any],
     task_id: str, 
-    programs: List[str],
-    timeout: float = 60.0  # Default timeout of 60 seconds
+    programs: List[str]
 ) -> Dict[str, Any]:
     """
     Evaluate programs for a task.
@@ -241,38 +214,14 @@ async def evaluate_task(
         solutions_data: Dictionary of solutions data
         task_id: Task ID
         programs: List of Python code strings
-        timeout: Maximum time to wait for the entire evaluation (in seconds)
         
     Returns:
         Dictionary with evaluation results
     """
-    print(f"Starting evaluation for task {task_id} with {len(programs)} programs (timeout: {timeout}s)...")
+    print(f"Starting evaluation for task {task_id} with {len(programs)} programs...")
     overall_start_time = time.time()
     
-    try:
-        # Use a timeout for the entire evaluation process
-        return await asyncio.wait_for(
-            _evaluate_task_impl(task_data, solutions_data, task_id, programs),
-            timeout
-        )
-    except asyncio.TimeoutError:
-        elapsed_time = time.time() - overall_start_time
-        print(f"Task evaluation timed out after {elapsed_time:.2f} seconds")
-        return {
-            "task_id": task_id,
-            "total_programs": len(programs),
-            "valid_programs": 0,
-            "valid_ratio": 0,
-            "majority_output": None,
-            "first_program_output": None,
-            "test_output": None,
-            "test_correct": False,
-            "valid_program_examples": [],
-            "training_predictions": {},
-            "timed_out": True,
-            "elapsed_time": elapsed_time,
-            "error": f"Task evaluation timed out after {elapsed_time:.2f} seconds"
-        }
+    return await _evaluate_task_impl(task_data, solutions_data, task_id, programs)
 
 async def _evaluate_task_impl(
     task_data: Dict[str, Any], 
@@ -293,36 +242,13 @@ async def _evaluate_task_impl(
         if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
             test_output = solutions_data[task_id][0]
     
-    # Evaluate all programs in a single batch with timeout
+    # Evaluate all programs in a single batch
     print(f"Evaluating {len(programs)} programs on {len(train_examples)} training examples...")
     eval_start_time = time.time()
     
-    try:
-        # Use a timeout for the batch evaluation
-        batch_results = await asyncio.wait_for(
-            evaluate_programs_batch(programs, train_examples, test_input),
-            timeout=30.0  # 30 second timeout for batch evaluation
-        )
-        eval_time = time.time() - eval_start_time
-        print(f"Batch evaluation completed in {eval_time:.2f}s")
-    except asyncio.TimeoutError:
-        eval_time = time.time() - eval_start_time
-        print(f"Batch evaluation timed out after {eval_time:.2f}s")
-        return {
-            "task_id": task_id,
-            "total_programs": len(programs),
-            "valid_programs": 0,
-            "valid_ratio": 0,
-            "majority_output": None,
-            "first_program_output": None,
-            "test_output": test_output,
-            "test_correct": False,
-            "valid_program_examples": [],
-            "training_predictions": {},
-            "timed_out": True,
-            "elapsed_time": eval_time,
-            "error": f"Batch evaluation timed out after {eval_time:.2f} seconds"
-        }
+    batch_results = await evaluate_programs_batch(programs, train_examples, test_input)
+    eval_time = time.time() - eval_start_time
+    print(f"Batch evaluation completed in {eval_time:.2f}s")
     
     valid_programs = batch_results.get("valid_programs", [])
     valid_count = len(valid_programs)
@@ -334,19 +260,11 @@ async def _evaluate_task_impl(
     
     # Get majority vote for test input if there are valid programs
     if valid_programs:
-        try:
-            print(f"Running majority voting with {valid_count} programs...")
-            vote_start_time = time.time()
-            majority_output = await asyncio.wait_for(
-                majority_vote(valid_programs, test_predictions),
-                timeout=5.0  # 5 second timeout for majority voting
-            )
-            vote_time = time.time() - vote_start_time
-            print(f"Majority voting completed in {vote_time:.2f}s")
-        except asyncio.TimeoutError:
-            vote_time = time.time() - vote_start_time
-            print(f"Majority voting timed out after {vote_time:.2f}s")
-            majority_output = None
+        print(f"Running majority voting with {valid_count} programs...")
+        vote_start_time = time.time()
+        majority_output = await majority_vote(valid_programs, test_predictions)
+        vote_time = time.time() - vote_start_time
+        print(f"Majority voting completed in {vote_time:.2f}s")
     else:
         majority_output = None
     
@@ -369,6 +287,5 @@ async def _evaluate_task_impl(
         "test_correct": test_correct,  # Add whether the test output is correct
         "valid_program_examples": valid_programs[:3] if valid_programs else [],
         "training_predictions": training_predictions,  # Add training predictions for visualization
-        "timed_out": batch_results.get("timed_out", False),  # Indicate if evaluation timed out
         "elapsed_time": elapsed_time
     }

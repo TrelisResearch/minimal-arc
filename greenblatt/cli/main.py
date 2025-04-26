@@ -37,8 +37,7 @@ async def process_single_task(
     top_k: int,
     concurrency: int,
     visualize: bool = False,
-    save_dir: Optional[Path] = None,
-    evaluation_timeout: float = 3.0
+    save_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Process a single task.
@@ -54,7 +53,6 @@ async def process_single_task(
         concurrency: Number of concurrent API calls
         visualize: Whether to visualize the results
         save_dir: Directory to save visualizations
-        evaluation_timeout: Maximum time for evaluation phase
         
     Returns:
         Dictionary with results for the task
@@ -81,35 +79,15 @@ async def process_single_task(
         if token_usage:
             print(f"Token usage: {token_usage}")
     
-    # Evaluate programs with a separate timeout
-    print(f"Evaluating {len(programs)} programs with timeout {evaluation_timeout}s...")
-    try:
-        evaluation_result = await asyncio.wait_for(
-            evaluate_task(
-                task_data=task_data,
-                solutions_data=solutions_data,
-                task_id=task_id,
-                programs=programs
-            ),
-            timeout=evaluation_timeout
-        )
-        print(f"Evaluation completed successfully")
-    except asyncio.TimeoutError:
-        print(f"Evaluation timed out after {evaluation_timeout}s")
-        evaluation_result = {
-            "task_id": task_id,
-            "total_programs": len(programs),
-            "valid_programs": 0,
-            "valid_ratio": 0,
-            "majority_output": None,
-            "first_program_output": None,
-            "test_output": None,
-            "test_correct": False,
-            "valid_program_examples": [],
-            "training_predictions": {},
-            "timed_out": True,
-            "error": f"Evaluation timed out after {evaluation_timeout}s"
-        }
+    # Evaluate programs
+    print(f"Evaluating {len(programs)} programs...")
+    evaluation_result = await evaluate_task(
+        task_data=task_data,
+        solutions_data=solutions_data,
+        task_id=task_id,
+        programs=programs
+    )
+    print(f"Evaluation completed successfully")
     
     # Calculate elapsed time
     elapsed_time = time.time() - start_time
@@ -164,11 +142,10 @@ async def debug_task(
     concurrency: int = 8,
     save_results: Optional[str] = None,
     visualize: bool = False,
-    save_viz: Optional[str] = None,
-    extended_timeout: bool = False  # Default to normal timeouts
+    save_viz: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Debug a single task with extended timeouts and detailed logging.
+    Debug a single task with detailed logging.
     
     Args:
         task_id: Task ID to debug
@@ -182,7 +159,6 @@ async def debug_task(
         save_results: Path to save results
         visualize: Whether to visualize the results
         save_viz: Directory to save visualizations
-        extended_timeout: Whether to use extended timeouts
         
     Returns:
         Dictionary with results for the task
@@ -216,26 +192,6 @@ async def debug_task(
         save_dir = Path(save_viz)
         save_dir.mkdir(parents=True, exist_ok=True)
     
-    # Set debug timeouts
-    if extended_timeout:
-        # Set longer timeouts for debugging
-        sandbox_timeout = 5.0  # 5 seconds for sandbox calls
-        evaluation_timeout = 10.0  # 10 seconds for evaluation
-        task_timeout = 60.0  # 60 seconds for the entire task
-        print(f"Using extended timeouts: sandbox={sandbox_timeout}s, evaluation={evaluation_timeout}s, task={task_timeout}s")
-    else:
-        # Use normal timeouts
-        sandbox_timeout = 3.0  # 3 seconds for sandbox calls
-        evaluation_timeout = 3.0  # 3 seconds for evaluation
-        task_timeout = 30.0  # 30 seconds for the entire task
-        print(f"Using normal timeouts: sandbox={sandbox_timeout}s, evaluation={evaluation_timeout}s, task={task_timeout}s")
-    
-    # Override the timeout in the runner module
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from sandbox.runner import set_default_timeout
-    set_default_timeout(sandbox_timeout)
-    
     try:
         print(f"Generating {k} programs...")
         # Generate programs
@@ -255,13 +211,12 @@ async def debug_task(
         print(f"Generated {len(programs)} programs")
         
         # Evaluate programs
-        print(f"Evaluating programs with timeout {evaluation_timeout}s...")
+        print(f"Evaluating programs...")
         evaluation_result = await evaluate_task(
             task_data=task_data,
             solutions_data=solutions_data,
             task_id=task_id,
-            programs=programs,
-            timeout=evaluation_timeout
+            programs=programs
         )
         
         print(f"Evaluation result: {json.dumps(evaluation_result, indent=2)}")
@@ -304,9 +259,7 @@ async def process_task_file(
     save_results: Optional[str] = None,
     visualize: bool = False,
     save_viz: Optional[str] = None,
-    task_timeout: float = 30.0,
-    max_tasks: Optional[int] = None,
-    evaluation_timeout: float = 3.0
+    max_tasks: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Process tasks from a file.
@@ -324,9 +277,7 @@ async def process_task_file(
         save_results: Path to save results
         visualize: Whether to visualize the results
         save_viz: Directory to save visualizations
-        task_timeout: Maximum time to spend on a single task (in seconds)
         max_tasks: Maximum number of tasks to process (None for all)
-        evaluation_timeout: Maximum time for the evaluation phase (in seconds)
         
     Returns:
         Dictionary with results for all tasks
@@ -373,78 +324,45 @@ async def process_task_file(
             continue
         
         try:
-            # Process the task with a timeout
+            # Process the task
             print(f"\n==================================================")
-            print(f"Processing task: {task_id} (timeout: {task_timeout}s)")
+            print(f"Processing task: {task_id}")
             print(f"==================================================")
             
             task_start_time = time.time()
             
-            try:
-                # Use asyncio.wait_for to enforce a timeout for the entire task
-                result = await asyncio.wait_for(
-                    process_single_task(
-                        task_data=task_data,
-                        solutions_data=solutions_data,
-                        task_id=task_id,
-                        k=k,
-                        temperature=temperature,
-                        top_p=top_p,
-                        top_k=top_k,
-                        concurrency=concurrency,
-                        visualize=visualize,
-                        save_dir=save_dir,
-                        evaluation_timeout=evaluation_timeout
-                    ),
-                    timeout=task_timeout
-                )
-                
-                task_elapsed_time = time.time() - task_start_time
-                print(f"Task {task_id} completed in {task_elapsed_time:.2f}s")
-                
-            except asyncio.TimeoutError:
-                task_elapsed_time = time.time() - task_start_time
-                print(f"Task {task_id} timed out after {task_elapsed_time:.2f}s")
-                result = {
-                    "task_id": task_id,
-                    "error": f"Task timed out after {task_timeout} seconds",
-                    "timed_out": True
-                }
+            result = await process_single_task(
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=task_id,
+                k=k,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                concurrency=concurrency,
+                visualize=visualize,
+                save_dir=save_dir
+            )
             
+            task_elapsed_time = time.time() - task_start_time
+            print(f"Task {task_id} completed in {task_elapsed_time:.2f}s")
+            
+            # Store the result
             results[task_id] = result
             
-            # Save incremental results after each task
+            # Save results after each task if requested
             if save_results:
                 with open(save_results, 'w') as f:
                     json.dump(results, f, indent=2)
-                print(f"Saved incremental results to {save_results}")
-                
+                print(f"Saved results to {save_results}")
+            
         except Exception as e:
             print(f"Error processing task {task_id}: {e}")
+            import traceback
+            traceback.print_exc()
             results[task_id] = {"error": str(e)}
-            
-            # Save results even if there was an error
-            if save_results:
-                with open(save_results, 'w') as f:
-                    json.dump(results, f, indent=2)
-                print(f"Saved results after error to {save_results}")
     
-    # Calculate overall statistics
-    total_tasks = len(results)
-    valid_tasks = sum(1 for r in results.values() if isinstance(r, dict) and r.get('valid_programs', 0) > 0)
-    correct_tasks = sum(1 for r in results.values() if isinstance(r, dict) and r.get('test_correct', False))
-    timed_out_tasks = sum(1 for r in results.values() if isinstance(r, dict) and r.get('timed_out', False))
-    
-    # Print overall statistics
-    print(f"\n==================================================")
-    print(f"Overall Results")
-    print(f"==================================================")
-    print(f"Total tasks: {total_tasks}")
-    print(f"Tasks with valid programs: {valid_tasks} ({valid_tasks/total_tasks:.2%})")
-    print(f"Tasks with correct test outputs: {correct_tasks} ({correct_tasks/total_tasks:.2%})")
-    print(f"Tasks that timed out: {timed_out_tasks} ({timed_out_tasks/total_tasks:.2%})")
-    
-    # Save final results
+    # Final save of results
     if save_results:
         with open(save_results, 'w') as f:
             json.dump(results, f, indent=2)
@@ -489,12 +407,8 @@ async def main_async() -> int:
                         help="Path to save results JSON")
     parser.add_argument("--save-viz", type=str,
                         help="Directory to save visualizations")
-    parser.add_argument("--task-timeout", type=float, default=30.0,
-                        help="Maximum time to spend on a single task (in seconds)")
     parser.add_argument("--max-tasks", type=int,
                         help="Maximum number of tasks to process")
-    parser.add_argument("--evaluation-timeout", type=float, default=3.0,
-                        help="Maximum time for the evaluation phase (in seconds)")
     
     args = parser.parse_args()
     
@@ -566,9 +480,7 @@ async def main_async() -> int:
                 save_results=args.save_results,
                 visualize=args.visualize,
                 save_viz=args.save_viz,
-                task_timeout=args.task_timeout,
-                max_tasks=args.max_tasks,
-                evaluation_timeout=args.evaluation_timeout
+                max_tasks=args.max_tasks
             )
         else:
             print("Error: Either --task-id, --task-file, or --debug must be specified")
