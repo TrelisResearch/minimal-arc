@@ -35,6 +35,8 @@ def main():
     parser.add_argument('--save', type=str, help='Save visualization to file')
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--direct-test', action='store_true', help='Directly test the tile_pattern function')
+    parser.add_argument('--parallel', action='store_true', help='Use parallel search (uses multiple CPU cores)')
+    parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search')
     
     args = parser.parse_args()
     
@@ -172,7 +174,8 @@ def main():
     prediction = None
     
     # Generate and verify programs
-    for program in iter_deepening(ALL_PRIMITIVES, args.depth, input_shape, output_shape, args.timeout):
+    for program in iter_deepening(ALL_PRIMITIVES, args.depth, input_shape, output_shape, args.timeout, 
+                                 args.parallel, args.num_processes):
         if verify(program, train_pairs):
             valid_program = program
             found_solution = True

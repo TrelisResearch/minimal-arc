@@ -26,6 +26,39 @@ This implementation uses a simple DSL approach to solve ARC tasks:
 3. **Verification**: Testing candidate programs against training examples (`search/verifier.py`)
 4. **Visualization**: Displaying inputs, outputs, and predictions (`io/visualizer.py`)
 
+## Search Capabilities
+
+The DSL includes a search algorithm that can find programs to solve ARC tasks:
+
+- **Iterative Deepening**: The search starts with simple programs (depth 1) and gradually increases complexity.
+- **Parallelization**: The search can utilize multiple CPU cores to speed up the process.
+- **Heuristics**: Shape-based heuristics guide the search toward promising programs.
+- **Timeout Control**: A configurable timeout prevents excessive search time.
+
+### Using Parallel Search
+
+To use parallel search, set the `parallel` parameter to `True` when calling `iter_deepening`:
+
+```python
+from dsl.search.enumerator import iter_deepening, ALL_PRIMITIVES
+
+# Sequential search (default)
+for program in iter_deepening(ALL_PRIMITIVES, max_depth=4, input_shape=(3, 3), output_shape=(3, 3)):
+    # Process program...
+
+# Parallel search
+for program in iter_deepening(ALL_PRIMITIVES, max_depth=4, input_shape=(3, 3), output_shape=(3, 3), 
+                             parallel=True):
+    # Process program...
+
+# Parallel search with custom number of processes
+for program in iter_deepening(ALL_PRIMITIVES, max_depth=4, input_shape=(3, 3), output_shape=(3, 3),
+                             parallel=True, num_processes=4):
+    # Process program...
+```
+
+By default, the parallel search will use `(number of CPU cores - 1)` processes to keep your system responsive.
+
 ## Project Structure
 
 - `dsl_utils/`: Core DSL implementation

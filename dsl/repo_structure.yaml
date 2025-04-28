@@ -1,0 +1,77 @@
+  - path: /requirements.txt
+    type: file
+  - path: /uv.lock
+    type: file
+  - path: /pyproject.toml
+    type: file
+  - path: /io
+    type: directory
+    contents:
+    - path: /io/__init__.py
+      type: file
+    - path: /io/loader.py
+      type: file
+    - path: /io/visualizer.py
+      type: file
+  - path: /tests
+    type: directory
+    contents:
+    - path: /tests/run_tests.py
+      type: file
+    - path: /tests/test_search.py
+      type: file
+    - path: /tests/test_primitives.py
+      type: file
+    - path: /tests/test_program.py
+      type: file
+    - path: /tests/debug_flood_fill.py
+      type: file
+  - path: /__init__.py
+    type: file
+  - path: /cli
+    type: directory
+    contents:
+    - path: /cli/__init__.py
+      type: file
+    - path: /cli/run_dataset.py
+      type: file
+    - path: /cli/run_task.py
+      type: file
+  - path: /todo.md
+    type: file
+  - path: /search
+    type: directory
+    contents:
+    - path: /search/heuristics.py
+      type: file
+    - path: /search/__init__.py
+      type: file
+    - path: /search/enumerator.py
+      type: file
+    - path: /search/verifier.py
+      type: file
+  - path: /README.md
+    type: file
+  - path: /results
+    type: directory
+    contents:
+  - path: /test_tile_pattern.py
+    type: file
+  - path: /dsl_utils
+    type: directory
+    contents:
+    - path: /dsl_utils/primitives.py
+      type: file
+    - path: /dsl_utils/__init__.py
+      type: file
+    - path: /dsl_utils/types.py
+      type: file
+    - path: /dsl_utils/program.py
+      type: file
+  - path: /examples
+    type: directory
+    contents:
+    - path: /examples/01_demo.ipynb
+      type: file
+  - path: /main.py
+    type: file
