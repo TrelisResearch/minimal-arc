@@ -5,34 +5,38 @@ This module implements verification of programs against training examples.
 """
 from typing import List, Tuple, Dict, Optional, Any
 import time
+import numpy as np
 
-from ..dsl_utils.program import Program
+from ..dsl_utils.program import Program, TimeoutException
 from ..dsl_utils.types import Grid
 from .heuristics import run_with_timeout
 
 
-def verify(program: Program, train_pairs: List[Tuple[Grid, Grid]], timeout_sec: float = 0.2) -> bool:
+def verify(program: Program, examples: List[Tuple[Grid, Grid]], op_timeout: float = 0.25) -> bool:
     """
-    Verify that a program correctly transforms all training examples.
+    Verify that a program produces the expected output for all examples.
     
     Args:
         program: The program to verify
-        train_pairs: List of (input, expected_output) pairs
-        timeout_sec: Timeout for each program execution in seconds
+        examples: List of (input, expected_output) pairs
+        op_timeout: Timeout for individual operations in seconds
         
     Returns:
-        True if the program passes all examples, False otherwise
+        True if the program produces the expected output for all examples, False otherwise
     """
-    for inp, expected in train_pairs:
-        # Run the program with a timeout
-        result = run_with_timeout(program, inp, timeout_sec)
-        
-        # If execution timed out or produced an error
-        if result is None:
+    for input_grid, expected_output in examples:
+        try:
+            # Run the program on the input
+            actual_output = program.run(input_grid, op_timeout=op_timeout)
+            
+            # Check if the output matches the expected output
+            if actual_output is None or not np.array_equal(actual_output.data, expected_output.data):
+                return False
+        except TimeoutException:
+            # If the program times out, it's not valid
             return False
-        
-        # Check if the result matches the expected output
-        if result != expected:
+        except Exception as e:
+            # If the program raises an exception, it's not valid
             return False
     
     return True

@@ -2,6 +2,10 @@
 
 A repository for working with the Abstraction and Reasoning Corpus (ARC) dataset.
 
+Apply to join the Trelis ARC AGI 2 Team [here](https://trelis.com/arc-agi-2/).
+
+Check out Trelis' video explaining ARC [here - forthcoming].
+
 Todo:
 [x] Greenblatt
     [x] [Sandboxing](https://chatgpt.com/c/6807b43f-8798-8003-87dc-79c42119a063)
