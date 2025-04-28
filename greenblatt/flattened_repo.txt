@@ -1,0 +1,3519 @@
+<core/prompt_template.txt>
+You are an expert Python programmer. Learn the grid-to-grid transformation
+from the TRAINING examples and write a **complete solution** with a `solve` function.
+
+First, provide your step-by-step reasoning within <think></think> tags. Break down:
+1. What patterns you observe in the training examples
+2. How the input transforms to output
+3. Your approach to solving the problem
+
+For example:
+<think>
+1. Looking at the examples, I notice that each 1 in the input becomes a 3x3 square of 1s in the output.
+2. The background (0s) remains unchanged.
+3. I'll implement this by creating a new grid 3x the size and filling in 3x3 squares for each 1.
+</think>
+
+Then provide your complete solution:
+
+```python
+# Include any necessary imports here
+# (limited to: itertools, math, copy, numpy)
+
+def solve(grid: List[List[int]]) -> List[List[int]]:
+    """
+    Transform the input grid according to the pattern learned from training examples.
+    
+    Args:
+        grid: A 2D list of integers representing the input grid
+        
+    Returns:
+        A 2D list of integers representing the transformed output grid
+    """
+    # Your solution here
+```
+
+Constraints:
+- No I/O, network, or random numbers
+- Only use Python builtins and the allowed modules: itertools, math, copy
+- Your code will be executed directly, so include any imports you need
+- The function MUST be named `solve` and accept a single grid parameter
+
+TRAINING: {{TRAIN_BLOCK}}
+
+TEST_INPUT: {{TEST_BLOCK}}
+
+First provide your thinking in <think></think> tags, then your complete solution code.
+
+</core/prompt_template.txt>
+
+<core/__init__.py>
+"""Core functionality for Greenblatt-style ARC demo."""
+
+</core/__init__.py>
+
+<core/evaluate.py>
+"""evaluate.py – unit-tests candidate programs against train pairs
+
+Filters out programs that:
+• raise exceptions
+• produce mismatched outputs or wrong grid sizes
+"""
+import asyncio
+import json
+import hashlib
+import time
+from typing import List, Dict, Any, Set, Tuple, Optional
+from pathlib import Path
+
+from sandbox.runner import run_batch_programs
+
+def grid_equals(grid1: List[List[int]], grid2: List[List[int]]) -> bool:
+    """Check if two grids are equal."""
+    # Check if dimensions match
+    if len(grid1) != len(grid2):
+        return False
+    
+    for row1, row2 in zip(grid1, grid2):
+        if len(row1) != len(row2):
+            return False
+        if row1 != row2:
+            return False
+    
+    return True
+
+def hash_code(code: str) -> str:
+    """Create a hash of the code for deduplication."""
+    # Normalize whitespace to avoid trivial differences
+    normalized = "\n".join(line.strip() for line in code.strip().split("\n") if line.strip())
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+async def evaluate_programs_batch(
+    programs: List[str],
+    train_examples: List[Dict[str, List[List[int]]]],
+    test_input: List[List[int]],
+    code_hashes: Set[str] = None
+) -> Dict[str, Any]:
+    """
+    Evaluate all programs against training examples and test input in a single batch.
+    
+    Args:
+        programs: List of Python code strings
+        train_examples: List of training examples with 'input' and 'output' keys
+        test_input: Test input grid
+        code_hashes: Set of code hashes for deduplication
+        
+    Returns:
+        Dictionary with evaluation results including valid programs and their outputs
+    """
+    print(f"Starting evaluation of {len(programs)} programs with {len(train_examples)} training examples...")
+    start_time = time.time()
+    
+    if not programs:
+        return {
+            "valid_programs": [],
+            "training_predictions": {},
+            "test_predictions": {},
+            "first_program_test_output": None
+        }
+    
+    # Deduplicate programs
+    unique_programs = []
+    program_indices = {}  # Maps program index in unique_programs to original index
+    
+    if code_hashes is None:
+        code_hashes = set()
+    
+    print("Deduplicating programs...")
+    for i, program in enumerate(programs):
+        code_hash = hash_code(program)
+        if code_hash not in code_hashes:
+            code_hashes.add(code_hash)
+            program_indices[len(unique_programs)] = i
+            unique_programs.append(program)
+    
+    print(f"After deduplication: {len(unique_programs)} unique programs")
+    
+    # Prepare all inputs (training + test)
+    train_inputs = [example["input"] for example in train_examples]
+    expected_outputs = [example["output"] for example in train_examples]
+    all_inputs = train_inputs + [test_input]
+    
+    # Run all programs on all inputs in a single batch
+    print(f"Running batch execution at {time.strftime('%H:%M:%S')}...")
+    batch_exec_start = time.time()
+    
+    batch_results = await run_batch_programs(unique_programs, all_inputs)
+    batch_exec_time = time.time() - batch_exec_start
+    print(f"Batch execution completed in {batch_exec_time:.2f}s")
+    
+    # Process the batch results
+    print(f"Processing results for {len(programs)} programs...")
+    process_start = time.time()
+    
+    all_results = {}
+    for i, program_idx in enumerate(program_indices.keys()):
+        if program_idx in batch_results:
+            outputs = batch_results[program_idx]
+            
+            if outputs is None:
+                continue
+                
+            # Split results into training and test outputs
+            train_outputs = outputs[:len(train_inputs)]
+            test_output = outputs[len(train_inputs)] if len(outputs) > len(train_inputs) else None
+            
+            # Check if all training outputs match expected outputs
+            is_valid = True
+            for output, expected in zip(train_outputs, expected_outputs):
+                if output is None or not grid_equals(output, expected):
+                    is_valid = False
+                    break
+            
+            # Store results for this program
+            orig_index = program_indices[program_idx]
+            all_results[orig_index] = {
+                "program": unique_programs[i],
+                "is_valid": is_valid,
+                "training_outputs": train_outputs,
+                "test_output": test_output
+            }
+    
+    process_time = time.time() - process_start
+    print(f"Result processing completed in {process_time:.2f}s")
+    
+    # Collect valid programs and their outputs
+    valid_programs = []
+    training_predictions = {}
+    test_predictions = {}
+    first_program_test_output = None
+    
+    # Get the first program's test output (valid or not)
+    if programs and 0 in all_results and all_results[0]["test_output"] is not None:
+        first_program_test_output = all_results[0]["test_output"]
+    
+    # Process results in original program order
+    for i in range(len(programs)):
+        if i in all_results and all_results[i]["is_valid"]:
+            program = all_results[i]["program"]
+            valid_programs.append(program)
+            
+            # Store training predictions for this valid program
+            training_predictions[program] = all_results[i]["training_outputs"]
+            
+            # Store test prediction for this valid program
+            if all_results[i]["test_output"] is not None:
+                test_predictions[program] = all_results[i]["test_output"]
+    
+    elapsed_time = time.time() - start_time
+    print(f"Evaluation completed in {elapsed_time:.2f}s with {len(valid_programs)} valid programs")
+    
+    return {
+        "valid_programs": valid_programs,
+        "training_predictions": training_predictions,
+        "test_predictions": test_predictions,
+        "first_program_test_output": first_program_test_output
+    }
+
+async def majority_vote(
+    valid_programs: List[str],
+    test_predictions: Dict[str, List[List[int]]]
+) -> Optional[List[List[int]]]:
+    """
+    Take the majority vote of all valid programs' test predictions.
+    
+    Args:
+        valid_programs: List of valid Python code strings
+        test_predictions: Dictionary mapping programs to their test predictions
+        
+    Returns:
+        The majority output grid or None if no valid output
+    """
+    if not valid_programs:
+        return None
+    
+    return await _majority_vote_impl(valid_programs, test_predictions)
+
+async def _majority_vote_impl(valid_programs: List[str], test_predictions: Dict[str, List[List[int]]]) -> Optional[List[List[int]]]:
+    """Implementation of majority voting without timeout handling."""
+    # Collect all outputs for the test input
+    all_outputs = []
+    for program in valid_programs:
+        if program in test_predictions and test_predictions[program] is not None:
+            all_outputs.append(json.dumps(test_predictions[program]))
+    
+    if not all_outputs:
+        return None
+    
+    # Count occurrences of each output
+    output_counts = {}
+    for output in all_outputs:
+        output_counts[output] = output_counts.get(output, 0) + 1
+    
+    # Find the majority output
+    majority_output = max(output_counts.items(), key=lambda x: x[1])[0]
+    
+    return json.loads(majority_output)
+
+async def evaluate_task(
+    task_data: Dict[str, Any], 
+    solutions_data: Dict[str, Any],
+    task_id: str, 
+    programs: List[str]
+) -> Dict[str, Any]:
+    """
+    Evaluate programs for a task.
+    
+    Args:
+        task_data: Dictionary of task data
+        solutions_data: Dictionary of solutions data
+        task_id: Task ID
+        programs: List of Python code strings
+        
+    Returns:
+        Dictionary with evaluation results
+    """
+    print(f"Starting evaluation for task {task_id} with {len(programs)} programs...")
+    overall_start_time = time.time()
+    
+    return await _evaluate_task_impl(task_data, solutions_data, task_id, programs)
+
+async def _evaluate_task_impl(
+    task_data: Dict[str, Any], 
+    solutions_data: Dict[str, Any],
+    task_id: str, 
+    programs: List[str]
+) -> Dict[str, Any]:
+    """Implementation of task evaluation without timeout handling."""
+    start_time = time.time()
+    
+    train_examples = task_data[task_id]["train"]
+    test_input = task_data[task_id]["test"][0]["input"]
+    
+    # Get ground truth for test example from solutions data if available
+    test_output = None
+    if task_id in solutions_data:
+        # The solutions data is just an array of outputs
+        if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
+            test_output = solutions_data[task_id][0]
+    
+    # Evaluate all programs in a single batch
+    print(f"Evaluating {len(programs)} programs on {len(train_examples)} training examples...")
+    eval_start_time = time.time()
+    
+    batch_results = await evaluate_programs_batch(programs, train_examples, test_input)
+    eval_time = time.time() - eval_start_time
+    print(f"Batch evaluation completed in {eval_time:.2f}s")
+    
+    valid_programs = batch_results.get("valid_programs", [])
+    valid_count = len(valid_programs)
+    print(f"Found {valid_count} valid programs out of {len(programs)}")
+    
+    training_predictions = batch_results.get("training_predictions", {})
+    test_predictions = batch_results.get("test_predictions", {})
+    first_program_output = batch_results.get("first_program_test_output")
+    
+    # Get majority vote for test input if there are valid programs
+    if valid_programs:
+        print(f"Running majority voting with {valid_count} programs...")
+        vote_start_time = time.time()
+        majority_output = await majority_vote(valid_programs, test_predictions)
+        vote_time = time.time() - vote_start_time
+        print(f"Majority voting completed in {vote_time:.2f}s")
+    else:
+        majority_output = None
+    
+    # Check if the majority output matches the ground truth
+    test_correct = False
+    if majority_output and test_output:
+        test_correct = grid_equals(majority_output, test_output)
+    
+    elapsed_time = time.time() - start_time
+    print(f"Task {task_id} evaluation completed in {elapsed_time:.2f}s - Test correct: {test_correct}")
+    
+    return {
+        "task_id": task_id,
+        "total_programs": len(programs),
+        "valid_programs": len(valid_programs),
+        "valid_ratio": len(valid_programs) / len(programs) if programs else 0,
+        "majority_output": majority_output,
+        "first_program_output": first_program_output,
+        "test_output": test_output,  # Add the ground truth
+        "test_correct": test_correct,  # Add whether the test output is correct
+        "valid_program_examples": valid_programs[:3] if valid_programs else [],
+        "training_predictions": training_predictions,  # Add training predictions for visualization
+        "elapsed_time": elapsed_time
+    }
+
+</core/evaluate.py>
+
+<core/generate_programs.py>
+"""generate_programs.py
+
+Async helper that:
+
+Builds the chat prompt (from prompt_template.txt + task JSON)
+Hits the OpenRouter 'chat/completions' endpoint with model="google/gemini-2.0-flash-001" # or gemini-flash-2.0-latest-001
+Streams / batches k completions (uses 'n' per request for efficiency)
+Yields raw code strings
+"""
+from __future__ import annotations
+import os
+import asyncio
+import json
+import time
+import ast
+from typing import AsyncIterator, List, Dict, Any, Optional, Tuple
+from pathlib import Path
+from openai import AsyncOpenAI
+
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+API_BASE = "https://openrouter.ai/api/v1"
+MODEL_ID = "google/gemini-2.0-flash-001"  # or "gemini-flash-2.0-latest-001"
+
+# Debug info for API key
+if OPENROUTER_API_KEY:
+    masked_key = OPENROUTER_API_KEY[:4] + '*' * (len(OPENROUTER_API_KEY) - 8) + OPENROUTER_API_KEY[-4:] if len(OPENROUTER_API_KEY) > 8 else '****'
+    print(f"Using OpenRouter API key: {masked_key}")
+else:
+    print("WARNING: OPENROUTER_API_KEY is not set")
+
+def load_prompt_template() -> str:
+    """Load the prompt template from the file."""
+    template_path = Path(__file__).parent / "prompt_template.txt"
+    with open(template_path, "r") as f:
+        return f.read()
+
+def format_grid(grid: List[List[int]]) -> str:
+    """Format a grid as a compact string representation."""
+    return json.dumps(grid)
+
+def build_prompt(task_data: Dict[str, Any], task_id: str) -> str:
+    """Build the prompt from the template and task data."""
+    template = load_prompt_template()
+    
+    # Format training examples
+    train_examples = []
+    for example in task_data[task_id]["train"]:
+        train_examples.append(f"Input: {format_grid(example['input'])}")
+        train_examples.append(f"Output: {format_grid(example['output'])}")
+    train_block = "\n".join(train_examples)
+    
+    # Format test input
+    test_input = task_data[task_id]["test"][0]["input"]
+    test_block = format_grid(test_input)
+    
+    # Replace placeholders
+    prompt = template.replace("{{TRAIN_BLOCK}}", train_block)
+    prompt = prompt.replace("{{TEST_BLOCK}}", test_block)
+    
+    return prompt
+
+def extract_code(response: str) -> Optional[str]:
+    """Extract code from the response, handling markdown code blocks and thinking steps."""
+    # Extract thinking steps if present
+    thinking = ""
+    if "<think>" in response and "</think>" in response:
+        think_parts = response.split("<think>", 1)
+        if len(think_parts) > 1:
+            thinking_content = think_parts[1].split("</think>", 1)[0].strip()
+            thinking = thinking_content
+            # Remove the thinking part from the response for code extraction
+            response = response.replace(f"<think>{thinking_content}</think>", "").strip()
+    
+    # Try to extract code from markdown code blocks
+    code_part = None
+    if "```python" in response:
+        parts = response.split("```python", 1)
+        if len(parts) > 1:
+            code_part = parts[1].split("```", 1)[0].strip()
+    elif "```" in response:
+        parts = response.split("```", 1)
+        if len(parts) > 1:
+            code_part = parts[1].split("```", 1)[0].strip()
+    else:
+        # If no code blocks found, use the whole response
+        code_part = response.strip()
+    
+    # If we have a code part and thinking, combine them
+    if code_part:
+        if thinking:
+            # Format thinking as a multiline comment block at the top of the code
+            formatted_thinking = "\n".join([f"# {line}" for line in thinking.split("\n")])
+            return f"# THINKING START\n{formatted_thinking}\n# THINKING END\n\n{code_part}"
+        return code_part
+    
+    return None
+
+def is_valid_python(code: str) -> bool:
+    """Check if the code is valid Python syntax."""
+    try:
+        ast.parse(code)
+        return True
+    except SyntaxError:
+        return False
+
+async def sample_programs(
+    prompt: str, 
+    k: int, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
+    concurrency: int = 32
+) -> AsyncIterator[str]:
+    """
+    Streams ~k completions; respects OpenRouter rate-limits with a semaphore.
+    
+    Args:
+        prompt: The prompt to send to the API
+        k: Number of programs to generate
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
+        concurrency: Number of concurrent API calls
+    
+    Yields:
+        Generated program strings
+    """
+    if not OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY environment variable not set")
+    
+    # Create a semaphore to limit concurrency
+    semaphore = asyncio.Semaphore(concurrency)
+    
+    # Create a queue for completed programs
+    queue = asyncio.Queue()
+    
+    # Create the AsyncOpenAI client
+    client = AsyncOpenAI(
+        base_url=API_BASE,
+        api_key=OPENROUTER_API_KEY,
+    )
+    
+    async def sample_program_with_backoff() -> None:
+        """Sample a single program with backoff for rate limits."""
+        # Implement exponential backoff for rate limits
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                async with semaphore:
+                    # Make the request with extra_headers
+                    response = await client.chat.completions.create(
+                        model=MODEL_ID,
+                        temperature=temperature,
+                        top_p=top_p,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        extra_headers={
+                            "HTTP-Referer": "https://github.com/TrelisResearch/arc-demo",
+                            "X-Title": "ARC-Greenblatt-Demo"
+                        }
+                    )
+                    
+                    # Track token usage if available
+                    if hasattr(response, 'usage'):
+                        print(f"Token usage: {response.usage}")
+                    
+                    # Extract and validate code from responses
+                    valid_code_found = False
+                    for choice in response.choices:
+                        code = extract_code(choice.message.content)
+                        if code and is_valid_python(code):
+                            valid_code_found = True
+                            await queue.put(code)
+                    
+                    # If no valid code was found, signal completion anyway
+                    if not valid_code_found:
+                        print(f"DEBUG: No valid code found in response, putting None in queue")
+                        await queue.put(None)
+                    
+                    # Signal completion
+                    return
+            
+            except Exception as e:
+                if hasattr(e, 'status_code') and e.status_code == 429:  # Rate limit exceeded
+                    # Get retry-after header or use exponential backoff
+                    retry_after = int(getattr(e, 'headers', {}).get("Retry-After", 2 ** attempt))
+                    print(f"Rate limit exceeded. Retrying after {retry_after} seconds...")
+                    await asyncio.sleep(retry_after)
+                else:
+                    # For other errors, print more detailed error information
+                    print(f"Error: {e}")
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt
+                        print(f"Retrying after {wait_time} seconds...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        print(f"Failed after {max_retries} attempts")
+                        print(f"DEBUG: Task failed, putting None in queue")
+                        await queue.put(None)  # Signal failure
+                        return
+        
+        # If we get here, all retries failed
+        print(f"DEBUG: All retries failed, putting None in queue")
+        await queue.put(None)  # Signal failure
+    
+    # Create tasks for API calls
+    tasks = []
+    for i in range(k):
+        task = asyncio.create_task(sample_program_with_backoff())
+        tasks.append(task)
+    
+    # Add a background task to monitor the state
+    async def monitor_state():
+        while True:
+            # Check task status
+            done_tasks = sum(1 for t in tasks if t.done())
+            pending_tasks = len(tasks) - done_tasks
+            
+            # Check queue size (approximate)
+            queue_size = queue.qsize() if hasattr(queue, 'qsize') else "unknown"
+            
+            print(f"DEBUG: State - remaining: {remaining}, done_tasks: {done_tasks}/{len(tasks)}, queue_size: {queue_size}")
+            
+            await asyncio.sleep(5)
+    
+    monitor_task = asyncio.create_task(monitor_state())
+    
+    try:
+        # Process completed programs as they arrive
+        remaining = k
+        while remaining > 0:
+            try:
+                print(f"DEBUG: Waiting for item from queue, remaining: {remaining}")
+                program = await queue.get()
+                print(f"DEBUG: Got item from queue: {'valid program' if program else 'None'}")
+                
+                if program is not None:
+                    yield program
+                    remaining -= 1
+                    print(f"DEBUG: Yielded program, remaining: {remaining}")
+                else:
+                    remaining -= 1
+                    print(f"DEBUG: Got None, remaining: {remaining}")
+            except Exception as e:
+                print(f"DEBUG: Error in queue.get(): {e}")
+                # Decrement remaining to avoid infinite loop
+                remaining -= 1
+                print(f"DEBUG: Error handling, remaining: {remaining}")
+        
+        print(f"DEBUG: Exited collection loop, remaining: {remaining}")
+    finally:
+        # Cancel the monitor task
+        monitor_task.cancel()
+        
+        # Cancel any remaining tasks
+        for task in tasks:
+            if not task.done():
+                print(f"DEBUG: Cancelling unfinished task")
+                task.cancel()
+    
+    # Wait for all tasks to complete
+    print(f"DEBUG: Waiting for all tasks to complete")
+    await asyncio.gather(*tasks, return_exceptions=True)
+    print(f"DEBUG: All tasks completed")
+
+async def sample_programs_with_usage(
+    prompt: str, 
+    k: int, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
+    concurrency: int = 32
+) -> AsyncIterator[Tuple[str, Any]]:
+    """
+    Sample programs from the API with token usage information.
+    
+    Args:
+        prompt: The prompt to send to the API
+        k: Number of programs to generate
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
+        concurrency: Number of concurrent API calls
+        
+    Yields:
+        Tuples of (program, token_usage)
+    """
+    count = 0
+    
+    async for program in sample_programs(
+        prompt=prompt,
+        k=k,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        concurrency=concurrency
+    ):
+        # Get the code from the completion
+        code = extract_code(program)
+        if code:
+            count += 1
+            # For now, we don't have per-completion token usage
+            # so we'll just return the completion as token_usage
+            yield code, None
+
+async def generate_programs_for_task(
+    task_data: Dict[str, Any], 
+    task_id: str, 
+    k: int, 
+    temperature: float = 1.0,
+    top_p: float = 0.9,
+    top_k: int = 20, 
+    concurrency: int = 32
+) -> AsyncIterator[Tuple[str, Any]]:
+    """
+    Generate programs for a specific task.
+    
+    Args:
+        task_data: Dictionary of task data
+        task_id: Task ID
+        k: Number of programs to generate
+        temperature: Temperature for generation (0.0-2.0)
+        top_p: Top-p sampling parameter (0.0-1.0)
+        top_k: Top-k sampling parameter (1-100)
+        concurrency: Number of concurrent API calls
+        
+    Yields:
+        Tuples of (program, token_usage)
+    """
+    prompt = build_prompt(task_data, task_id)
+    
+    async for program, token_usage in sample_programs_with_usage(
+        prompt=prompt,
+        k=k,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        concurrency=concurrency
+    ):
+        yield program, token_usage
+
+def load_task_data(task_file: str) -> Dict[str, Any]:
+    """Load task data from a JSON file."""
+    with open(task_file, 'r') as f:
+        return json.load(f)
+
+def load_task_ids(task_list_file: str) -> List[str]:
+    """
+    Load a list of task IDs from a JSON file.
+    
+    Handles both dictionary format (returns keys) and list format (returns the list).
+    """
+    with open(task_list_file, 'r') as f:
+        data = json.load(f)
+        
+        # Handle both dictionary and list formats
+        if isinstance(data, dict):
+            return list(data.keys())
+        elif isinstance(data, list):
+            return data
+        else:
+            raise ValueError(f"Unexpected format in {task_list_file}. Expected dict or list, got {type(data)}")
+
+</core/generate_programs.py>
+
+<project.md>
+Below is a ** setup_demo.sh** skeleton plus a detailed build plan.
+The script only scaffolds the project-tree and installs the right dependencies; every file it writes is a stub with TODO placeholders so you can fill in, test and iterate.
+(You asked not to implement the full logic yet, only to give you the structure and guidance.)
+
+#!/usr/bin/env bash
+# =========================================================
+# setup_demo.sh – scaffold a Ryan-Greenblatt–style ARC demo
+# =========================================================
+# 1. Creates a clean Python venv
+# 2. Installs core deps (OpenRouter client, asyncio/httpx,
+#    pydantic-ai + mcp-run-python, numpy/matplotlib, etc.)
+# 3. Writes stub modules under ./greenblatt/
+# 4. Pulls the official mcp-run-python server (needs deno)
+# ---------------------------------------------------------
+# USAGE
+#   chmod +x setup_demo.sh
+#   ./setup_demo.sh
+#
+# Afterwards open README_DEV.md for next steps.
+# ---------------------------------------------------------
+
+set -e
+PROJECT_ROOT=$(pwd)
+echo "Project root = ${PROJECT_ROOT}"
+
+PYTHON_VERSION=${PYTHON_VERSION:-"3.11"}
+VENV_DIR=".venv-arc-demo"
+
+echo "🛠  Creating virtualenv (${VENV_DIR}) …"
+python${PYTHON_VERSION} -m venv ${VENV_DIR}
+source ${VENV_DIR}/bin/activate
+pip install --upgrade pip
+
+echo "📦  Installing Python packages …"
+pip install \
+  "httpx[http2]" \
+  openai \
+  pydantic-ai-slim[mcp] \
+  "uvicorn~=0.29" \
+  numpy \
+  matplotlib \
+  tqdm \
+  rich
+
+# optional: faster JSON & TOML
+pip install "orjson" "ujson"
+
+echo "🌐  Installing & caching mcp-run-python assets …"
+# Requires Deno ≥1.43 – user must have it in PATH.
+deno install -qf -n deno_placeholder https://deno.land/std/examples/welcome.ts || true
+deno cache jsr:@pydantic/mcp-run-python || true
+
+echo "📁  Generating stub source tree …"
+mkdir -p greenblatt/{agent,cli,core,sandbox,viz}
+
+# ---------- stub files -------------------------------------------------
+cat <<'PY' > greenblatt/core/prompt_template.txt
+You are an expert Python programmer. Learn the grid-to-grid transformation
+from the TRAINING examples and write a **pure function**:
+```python
+def solve(grid: List[List[int]]) -> List[List[int]]:
+    ...
+Constraints:
+
+No I/O, network, or random numbers
+Only builtin Python + itertools, math, copy TRAINING: {{TRAIN_BLOCK}} TEST_INPUT: {{TEST_BLOCK}} Return code only, no commentary. PY
+cat <<'PY' > greenblatt/core/generate_programs.py """ generate_programs.py
+
+Async helper that:
+
+Builds the chat prompt (from prompt_template.txt + task JSON)
+Hits the OpenRouter 'chat/completions' endpoint with model="google/gemini-2.0-flash-001" # or gemini-flash-2.0-latest-001
+Streams / batches k completions (uses 'n' per request for efficiency)
+Yields raw code strings NOTE: Fill the TODO sections before running. """ from future import annotations import os, asyncio, httpx, json, time from typing import AsyncIterator, List
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY") API_BASE = "https://openrouter.ai/api/v1" MODEL_ID = "google/gemini-2.0-flash-001" # ⇐ confirm slug in dashboard
+
+async def sample_programs(prompt: str, k: int, batch_size: int = 5, temperature: float = 1.0, concurrency: int = 4) -> AsyncIterator[str]: """ Streams ~k completions; respects OpenRouter rate-limits with a semaphore. """ sem = asyncio.Semaphore(concurrency) async with httpx.AsyncClient(base_url=API_BASE, timeout=30.0) as client: async def _single_call() -> List[str]: req = { "model": MODEL_ID, "temperature": temperature, "n": batch_size, "messages": [ {"role": "user", "content": prompt} ] } hdrs = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "HTTP-Referer": "https://github.com/your-handle/arc-demo", "X-Title": "ARC-Greenblatt-Demo"} async with sem: r = await client.post("/chat/completions", headers=hdrs, json=req) r.raise_for_status() data = r.json() return [c["message"]["content"] for c in data["choices"]]
+
+    remaining = k
+    while remaining > 0:
+        got = await _single_call()
+        for code in got:
+            yield code
+        remaining -= len(got)
+PY
+
+cat <<'PY' > greenblatt/sandbox/runner.py """ runner.py – thin wrapper around MCP:run-python Starts (or reuses) an MCP server to sandbox-execute LLM-generated code.
+
+Uses pydantic_ai.mcp.MCPServerStdio to spin up 'deno run jsr:@pydantic/mcp-run-python stdio'
+Provides run_in_sandbox(code: str, inputs: list[list]) -> list[list] """
+TODO: wire together MCP client session, timeout guards, result parsing
+
+PY
+
+cat <<'PY' > greenblatt/core/evaluate.py """ evaluate.py – unit-tests candidate programs against train pairs Filters out programs that: • raise exceptions • produce mismatched outputs or wrong grid sizes """
+
+TODO: implement strict equality + early bail-out on first failure
+
+PY
+
+cat <<'PY' > greenblatt/viz/show_grids.py """ show_grids.py – quick matplotlib visualizer Usage: python -m greenblatt.viz.show_grids path/to/task.json Draws: input(s), expected output(s), candidate LLM output """
+
+TODO: use plt.imshow & custom ListedColormap
+
+PY
+
+cat <<'PY' > greenblatt/cli/main.py """ CLI entrypoint.
+
+Options
+
+--task-id <hash> --task-file <json list> # e.g. arc-data-cleaned/mit-easy.json --k <int> # samples per task --concurrency <int> --batch-size <int> # completions per API call Samples programs, filters them, majority-votes test output, and prints / saves results. """
+
+TODO: argparse boilerplate + orchestration
+
+PY
+
+-----------------------------------------------------------------------
+
+echo "✅ Scaffolding complete." echo "🔑 Remember to: export OPENROUTER_API_KEY='<your-key>'" echo "📝 Next: open greenblatt/cli/main.py and start coding!"
+
+
+---
+
+## How the pieces fit together (implementation guide)
+
+| Stage | Key file(s) | What to add | Gotchas & tips |
+|-------|-------------|-------------|----------------|
+| **Prompt assembly** | `core/prompt_template.txt` + helper inside `generate_programs.py` | Insert grid examples with minimal whitespace – every extra token costs money. Include *one* solved toy task to nudge the model toward 2-D reasoning. | Gemini Flash tokens are cheaper than GPT-4o but still add up. Trim prompt aggressively (no base-64 grids, no color legends). |
+| **Program sampling** | `core/generate_programs.py` | Use `n` completions per request (e.g. `n=5`) to amortize prompt tokens. Fire multiple HTTP requests concurrently with a semaphore. | OpenRouter rate-limits by token/min; obey `Retry-After` header and exponential-back-off on 429. |
+| **Sandbox execution** | `sandbox/runner.py` | Start **mcp-run-python** once and reuse. For each candidate: ① inject the code into the sandbox, ② run `solve(grid)` for each training input, ③ capture stdout/stderr. | *mcp-run-python* spins Pyodide inside Deno – import time on first run is ~1 s; warm-up to avoid latency. Limit per-call wall-time (e.g. 2 s) and memory. |
+| **Unit-test filter** | `core/evaluate.py` | Reject programs on first failure to save cycles. Keep a hash-set to deduplicate identical code. | Watch for silent failures: some code returns `None` instead of grid; enforce type/shape checks. |
+| **Voting / selection** | inside `cli/main.py` | After filtering, run all valid programs on the test input(s) and take the *mode* (majority) grid. | Ties are rare; break by `(first_seen)` or by grid hash order. |
+| **Visualisation** | `viz/show_grids.py` | Build a 3×N subplot: original input, ground-truth output (if available), best candidate output. Use `matplotlib.colors.ListedColormap` with the 10 ARC colors. | Keep colour indices consistent (0-9); set `plt.axis('off')` for clarity. |
+| **Evaluation harness** | extend `evaluate.py` | When you pass a *file* (e.g. `mit-easy.json` list), iterate over IDs, call the pipeline, compare result to solutions in `arc-data-cleaned`. | Some public ARC subsets contain tasks with *multiple* test inputs; handle each and compute per-task “all correct” metric. |
+| **Concurrency tuning** | controlled in `cli/main.py` | A good default: `k=200`, `batch_size=5`, `concurrency=6` ⇒ ~200/5 = 40 HTTP calls. | Gemini Flash returns in 0.2-0.8 s; make sure you don’t saturate the 60k TPM quota. |
+| **Cost tracking** | add a small utility | Collect `usage` from each OpenRouter response and accumulate. Print `$ spent` at the end. | Gemini Flash 2.0 pricing (Mar 2025): ~$0.075/M input, $0.30/M output tokens – cheaper than GPT-4o. |
+
+### mcp-run-python quick-start
+
+```bash
+# install deno if not present
+curl -fsSL https://deno.land/install.sh | sh
+# warm-up & launch server on port 4321 (SSE mode)
+deno run \
+  -A jsr:@pydantic/mcp-run-python sse --port 4321
+Inside Python:
+
+from pydantic_ai.mcp import MCPClientSSE
+mcp = await MCPClientSSE.connect("http://127.0.0.1:4321")
+sandbox_id = await mcp.create_sandbox(image="python:3.11-slim")
+out = await mcp.execute_python_code(
+        sandbox_id=sandbox_id,
+        code="from solution import solve\nprint(solve(inp))",
+        timeout=2.0)
+Command-line usage examples
+# Single task demo
+python -m greenblatt.cli.main \
+   --task-id 00576224 \
+   --k 300 --batch-size 5 --concurrency 4
+
+# Evaluate a whole subset
+python -m greenblatt.cli.main \
+   --task-file arc-data-cleaned/mit-easy.json \
+   --k 400 --batch-size 5 --concurrency 8 \
+   --save-results results_mit_easy.json
+Caveats & common pitfalls
+Prompt overflow – Gemini Flash has a 1 048 576-token context, but requests larger than ~512 k tokens are rejected; your prompt + completion length × n must stay well under this.
+Sandbox cold-starts – the first Pyodide load can take ~900 ms; keep the server alive for batch evaluations.
+Colour index confusion – ARC uses integers 0-9; treat 0 as not blank, unlike some 2020 write-ups that zero out black.
+Rate-limits – OpenRouter enforces per-minute and per-day token caps. Capture HTTP 429 and retry after Retry-After.
+Gemini quirks – the Flash model occasionally emits badly indented code. Strip Markdown fences and run ast.parse() for a fast validity check before sandboxing.
+Cost drift – Small changes in k and batch_size compound fast. Track cumulative usage.input_tokens/output_tokens to stay under your $25 budget.
+Next step: run ./setup_demo.sh, open the generated stubs, and start implementing each TODO. Once cli/main.py is wired up, you’ll have a lightweight, educational replica of Greenblatt-style program search that you can scale from a single MIT-easy task to a full evaluation set.
+Good hacking! 
+</project.md>
+
+<run_k_analysis.py>
+#!/usr/bin/env python3
+"""
+Run K Analysis
+
+This script runs a dataset multiple times with different values of k and plots
+the number of correctly solved tasks versus k using the majority voting approach.
+"""
+import os
+import json
+import asyncio
+import argparse
+import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Dict, Any, List, Tuple
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+if os.path.exists(".env"):
+    load_dotenv()
+    print("Loaded environment variables from .env file")
+    if os.environ.get("OPENROUTER_API_KEY"):
+        print(f"Using OpenRouter API key: {os.environ.get('OPENROUTER_API_KEY')[:2]}{'*' * 69}{os.environ.get('OPENROUTER_API_KEY')[-4:]}")
+    else:
+        print("WARNING: OPENROUTER_API_KEY is not set")
+else:
+    print("WARNING: .env file not found")
+
+# Import from the existing codebase
+from cli.main import process_task_file
+from sandbox.runner import set_use_local_executor
+
+
+async def run_with_different_k(
+    task_file: str,
+    data_file: str,
+    solutions_file: str,
+    k_values: List[int],
+    concurrency: int = 32,
+    temperature: float = 1.0,
+    output_dir: str = "results"
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Run the dataset with different values of k.
+    
+    Args:
+        task_file: Path to the task file
+        data_file: Path to the data file
+        solutions_file: Path to the solutions file
+        k_values: List of k values to try
+        concurrency: Number of concurrent API calls
+        temperature: Temperature for generation
+        output_dir: Directory to save results
+        
+    Returns:
+        Dictionary mapping k values to task results
+    """
+    # Create output directory
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Run for each k value
+    results = {}
+    for k in k_values:
+        print(f"\n{'='*50}")
+        print(f"Running with k = {k}")
+        print(f"{'='*50}")
+        
+        # Create results directory for this k value
+        k_dir = output_path / f"k_{k}"
+        k_dir.mkdir(exist_ok=True)
+        
+        # Process the task file
+        result = await process_task_file(
+            task_file=task_file,
+            task_ids_file=task_file,
+            k=k,
+            temperature=temperature,
+            top_p=1.0,
+            top_k=40,
+            concurrency=concurrency,
+            data_file=data_file,
+            solutions_file=solutions_file,
+            save_results=str(k_dir / "results.json"),
+            visualize=False
+        )
+        
+        # Store the results
+        results[k] = result
+        
+        # Save the combined results so far
+        with open(output_path / "combined_results.json", "w") as f:
+            json.dump({str(k): results[k] for k in results}, f, indent=2)
+    
+    return results
+
+
+def analyze_results(results: Dict[int, Dict[str, Any]]) -> Tuple[List[int], List[int], List[float]]:
+    """
+    Analyze the results to extract metrics for plotting.
+    
+    Args:
+        results: Dictionary mapping k values to results
+        
+    Returns:
+        Tuple of (k_values, correct_tasks, correct_ratio)
+    """
+    k_values = sorted(results.keys())
+    correct_tasks = []
+    correct_ratio = []
+    
+    for k in k_values:
+        # Count correct tasks
+        correct = sum(1 for task_id, task_result in results[k].items() 
+                      if task_result.get("test_correct", False))
+        total = len(results[k])
+        
+        correct_tasks.append(correct)
+        correct_ratio.append(correct / total if total > 0 else 0)
+    
+    return k_values, correct_tasks, correct_ratio
+
+
+def plot_results(
+    k_values: List[int],
+    correct_tasks: List[int],
+    correct_ratio: List[float],
+    output_path: str = "results/k_analysis.png"
+):
+    """
+    Plot the results.
+    
+    Args:
+        k_values: List of k values
+        correct_tasks: List of correct task counts
+        correct_ratio: List of correct task ratios
+        output_path: Path to save the plot
+    """
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Plot correct tasks vs k
+    ax1.plot(k_values, correct_tasks, 'o-', linewidth=2)
+    ax1.set_xlabel('k (Number of Programs Generated)')
+    ax1.set_ylabel('Number of Correct Tasks')
+    ax1.set_title('Correct Tasks vs k')
+    ax1.grid(True)
+    
+    # Plot correct ratio vs k
+    ax2.plot(k_values, [r * 100 for r in correct_ratio], 'o-', linewidth=2)
+    ax2.set_xlabel('k (Number of Programs Generated)')
+    ax2.set_ylabel('Correct Tasks (%)')
+    ax2.set_title('Correct Task Percentage vs k')
+    ax2.grid(True)
+    
+    # Set y-axis to start from 0
+    ax1.set_ylim(bottom=0)
+    ax2.set_ylim(bottom=0, top=100)
+    
+    # Add k values as x-ticks
+    ax1.set_xticks(k_values)
+    ax2.set_xticks(k_values)
+    
+    # Add a note about majority voting
+    fig.text(0.5, 0.01, 
+             'Note: Results use majority voting among valid programs, which is more strict than standard pass@k',
+             ha='center', fontsize=10)
+    
+    plt.tight_layout()
+    plt.savefig(output_path)
+    print(f"Plot saved to {output_path}")
+    plt.show()
+
+
+async def main():
+    """Main function."""
+    parser = argparse.ArgumentParser(description="Run K Analysis")
+    
+    # Input files
+    parser.add_argument("--task-file", type=str, required=True,
+                        help="Path to JSON file with task IDs")
+    parser.add_argument("--data-file", type=str, 
+                        default="../arc-data-cleaned/arc-agi_evaluation_challenges.json",
+                        help="Path to JSON file with task data")
+    parser.add_argument("--solutions-file", type=str,
+                        default="../arc-data-cleaned/arc-agi_evaluation_solutions.json",
+                        help="Path to JSON file with solutions data")
+    
+    # K values
+    parser.add_argument("--k-values", type=str, default="2,8,32",
+                        help="Comma-separated list of k values to try")
+    
+    # Generation parameters
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="Temperature for generation")
+    parser.add_argument("--concurrency", type=int, default=32,
+                        help="Number of concurrent API calls")
+    
+    # Output options
+    parser.add_argument("--output-dir", type=str, default="results/k_analysis",
+                        help="Directory to save results")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="Use local Python executor with AST-based security instead of MCP sandbox")
+    
+    args = parser.parse_args()
+    
+    # Configure sandbox mode
+    set_use_local_executor(args.no_sandbox)
+    
+    # Parse k values
+    k_values = [int(k) for k in args.k_values.split(",")]
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    try:
+        # Run with different k values
+        results = await run_with_different_k(
+            task_file=args.task_file,
+            data_file=args.data_file,
+            solutions_file=args.solutions_file,
+            k_values=k_values,
+            concurrency=args.concurrency,
+            temperature=args.temperature,
+            output_dir=args.output_dir
+        )
+        
+        # Analyze and plot results
+        k_values, correct_tasks, correct_ratio = analyze_results(results)
+        plot_results(
+            k_values=k_values,
+            correct_tasks=correct_tasks,
+            correct_ratio=correct_ratio,
+            output_path=os.path.join(args.output_dir, "k_analysis.png")
+        )
+        
+        # Print summary
+        print("\nSummary:")
+        for k, correct, ratio in zip(k_values, correct_tasks, correct_ratio):
+            print(f"k = {k}: {correct} correct tasks ({ratio:.2%})")
+            
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    finally:
+        # Clean up resources
+        from sandbox.runner import cleanup
+        await cleanup()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+</run_k_analysis.py>
+
+<__init__.py>
+"""Greenblatt-style ARC demo package."""
+
+</__init__.py>
+
+<agent/__init__.py>
+"""Agent-related functionality for Greenblatt-style ARC demo."""
+
+</agent/__init__.py>
+
+<cli/__init__.py>
+"""Command-line interface for Greenblatt-style ARC demo."""
+
+</cli/__init__.py>
+
+<cli/main.py>
+"""CLI entrypoint.
+
+Options
+--task-id <hash>
+--task-file <json list>  # e.g. arc-data-cleaned/mit-easy.json
+--k <int>  # samples per task
+--concurrency <int>
+--temperature <float>  # temperature for generation
+--top-p <float>  # top-p sampling parameter
+--top-k <int>  # top-k sampling parameter
+--save-results <path>  # save results to JSON file
+--debug  # debug mode
+
+Samples programs, filters them, majority-votes test output, and prints / saves results.
+"""
+import os
+import sys
+import json
+import time
+import asyncio
+import argparse
+from pathlib import Path
+from typing import List, Dict, Any, Optional
+
+from core.generate_programs import generate_programs_for_task, load_task_data, load_task_ids
+from core.evaluate import evaluate_task
+from viz.show_grids import visualize_task
+from sandbox.runner import cleanup, set_use_local_executor
+
+async def process_single_task(
+    task_data: Dict[str, Any],
+    solutions_data: Dict[str, Any],
+    task_id: str,
+    k: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    concurrency: int,
+    visualize: bool = False,
+    save_dir: Optional[Path] = None
+) -> Dict[str, Any]:
+    """
+    Process a single task.
+    
+    Args:
+        task_data: Dictionary of task data
+        solutions_data: Dictionary of solutions data
+        task_id: Task ID
+        k: Number of programs to generate
+        temperature: Temperature for generation
+        top_p: Top-p sampling parameter
+        top_k: Top-k sampling parameter
+        concurrency: Number of concurrent API calls
+        visualize: Whether to visualize the results
+        save_dir: Directory to save visualizations
+        
+    Returns:
+        Dictionary with results for the task
+    """
+    print(f"\n==================================================")
+    print(f"Processing task: {task_id}")
+    print(f"==================================================")
+    
+    # Generate programs
+    print(f"Generating {k} programs...")
+    start_time = time.time()
+    programs = []
+    
+    async for program, token_usage in generate_programs_for_task(
+        task_data=task_data,
+        task_id=task_id,
+        k=k,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        concurrency=concurrency
+    ):
+        programs.append(program)
+        if token_usage:
+            print(f"Token usage: {token_usage}")
+    
+    # Evaluate programs
+    print(f"Evaluating {len(programs)} programs...")
+    evaluation_result = await evaluate_task(
+        task_data=task_data,
+        solutions_data=solutions_data,
+        task_id=task_id,
+        programs=programs
+    )
+    print(f"Evaluation completed successfully")
+    
+    # Calculate elapsed time
+    elapsed_time = time.time() - start_time
+    
+    # Print results
+    print(f"\nResults for task {task_id}:")
+    print(f"Total programs: {evaluation_result['total_programs']}")
+    print(f"Valid programs: {evaluation_result['valid_programs']} ({evaluation_result['valid_ratio']:.2%})")
+    if 'test_correct' in evaluation_result:
+        print(f"Test correct: {'Yes' if evaluation_result['test_correct'] else 'No'}")
+    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    
+    # Visualize if requested
+    if visualize:
+        print("Visualizing results...")
+        # Use majority_output if available, otherwise use first_program_output
+        candidate_output = evaluation_result.get('majority_output') or evaluation_result.get('first_program_output')
+        
+        # Get valid programs from the result
+        valid_programs = evaluation_result.get('valid_program_examples', [])
+        
+        # Get training predictions from the result
+        training_predictions = evaluation_result.get('training_predictions', {})
+        
+        # Check if we have valid programs but the test failed
+        has_valid_programs = evaluation_result.get('valid_programs', 0) > 0
+        test_failed = not evaluation_result.get('test_correct', False)
+        
+        if has_valid_programs and test_failed:
+            print("Note: Valid programs exist but test failed. Showing training predictions for comparison.")
+        
+        visualize_task(
+            task_data=task_data,
+            solutions_data=solutions_data,
+            task_id=task_id,
+            candidate_output=candidate_output,
+            valid_programs=valid_programs,
+            save_path=str(save_dir / f"{task_id}.png") if save_dir else None,
+            training_predictions=training_predictions
+        )
+    
+    return evaluation_result
+
+async def debug_task(
+    task_id: str,
+    data_file: str,
+    solutions_file: Optional[str] = None,
+    k: int = 8,
+    temperature: float = 0.8,
+    top_p: float = 1.0,
+    top_k: int = 40,
+    concurrency: int = 8,
+    save_results: Optional[str] = None,
+    visualize: bool = False,
+    save_viz: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Debug a single task with detailed logging.
+    
+    Args:
+        task_id: Task ID to debug
+        data_file: Path to data file
+        solutions_file: Path to solutions file
+        k: Number of programs to generate
+        temperature: Temperature for generation
+        top_p: Top-p sampling parameter
+        top_k: Top-k sampling parameter
+        concurrency: Number of concurrent API calls
+        save_results: Path to save results
+        visualize: Whether to visualize the results
+        save_viz: Directory to save visualizations
+        
+    Returns:
+        Dictionary with results for the task
+    """
+    print(f"\n==================================================")
+    print(f"DEBUGGING TASK: {task_id}")
+    print(f"==================================================")
+    
+    # Load task data
+    print(f"Loading task data from {data_file}...")
+    task_data = load_task_data(data_file)
+    
+    # Load solutions data if provided
+    solutions_data = {}
+    if solutions_file:
+        with open(solutions_file, 'r') as f:
+            solutions_data = json.load(f)
+        print(f"Loaded solutions data from {solutions_file}")
+    else:
+        # Try to find solutions file based on data file
+        if 'challenges' in data_file:
+            potential_solutions_file = data_file.replace('challenges', 'solutions')
+            if os.path.exists(potential_solutions_file):
+                with open(potential_solutions_file, 'r') as f:
+                    solutions_data = json.load(f)
+                print(f"Automatically loaded solutions from {potential_solutions_file}")
+    
+    # Create save directory if needed
+    save_dir = None
+    if save_viz:
+        save_dir = Path(save_viz)
+        save_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        print(f"Generating {k} programs...")
+        # Generate programs
+        programs = []
+        async for program, token_usage in generate_programs_for_task(
+            task_data=task_data,
+            task_id=task_id,
+            k=k,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            concurrency=concurrency
+        ):
+            programs.append(program)
+            print(f"Token usage: {token_usage}")
+        
+        print(f"Generated {len(programs)} programs")
+        
+        # Evaluate programs
+        print(f"Evaluating programs...")
+        evaluation_result = await evaluate_task(
+            task_data=task_data,
+            solutions_data=solutions_data,
+            task_id=task_id,
+            programs=programs
+        )
+        
+        print(f"Evaluation result: {json.dumps(evaluation_result, indent=2)}")
+        
+        # Visualize if requested
+        if visualize:
+            print("Visualizing results...")
+            await visualize_task(
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=task_id,
+                result=evaluation_result,
+                save_dir=save_dir
+            )
+        
+        # Save results if requested
+        if save_results:
+            with open(save_results, 'w') as f:
+                json.dump({task_id: evaluation_result}, f, indent=2)
+            print(f"Saved results to {save_results}")
+        
+        return evaluation_result
+    
+    except Exception as e:
+        print(f"Error debugging task {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e)}
+
+async def process_task_file(
+    task_file: str,
+    task_ids_file: str,
+    k: int,
+    temperature: float,
+    top_p: float,
+    top_k: int,
+    concurrency: int,
+    data_file: str,
+    solutions_file: Optional[str] = None,
+    save_results: Optional[str] = None,
+    visualize: bool = False,
+    save_viz: Optional[str] = None,
+    max_tasks: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Process tasks from a file.
+    
+    Args:
+        task_file: Path to task list file
+        task_ids_file: Path to task IDs file
+        k: Number of programs to generate per task
+        temperature: Temperature for generation
+        top_p: Top-p sampling parameter
+        top_k: Top-k sampling parameter
+        concurrency: Number of concurrent API calls
+        data_file: Path to data file
+        solutions_file: Path to solutions file
+        save_results: Path to save results
+        visualize: Whether to visualize the results
+        save_viz: Directory to save visualizations
+        max_tasks: Maximum number of tasks to process (None for all)
+        
+    Returns:
+        Dictionary with results for all tasks
+    """
+    # Load task IDs
+    task_ids = load_task_ids(task_ids_file)
+    print(f"Loaded {len(task_ids)} task IDs from {task_ids_file}")
+    
+    # Apply max_tasks limit if specified
+    if max_tasks is not None and max_tasks > 0:
+        task_ids = task_ids[:max_tasks]
+        print(f"Limited to processing {max_tasks} tasks")
+    
+    # Load task data
+    task_data = load_task_data(data_file)
+    print(f"Loaded task data from {data_file}")
+    
+    # Load solutions data if provided
+    solutions_data = {}
+    if solutions_file:
+        with open(solutions_file, 'r') as f:
+            solutions_data = json.load(f)
+        print(f"Loaded solutions data from {solutions_file}")
+    else:
+        # Try to find solutions file based on data file
+        if 'challenges' in data_file:
+            potential_solutions_file = data_file.replace('challenges', 'solutions')
+            if os.path.exists(potential_solutions_file):
+                with open(potential_solutions_file, 'r') as f:
+                    solutions_data = json.load(f)
+                print(f"Automatically loaded solutions from {potential_solutions_file}")
+    
+    # Create save directory if needed
+    save_dir = None
+    if save_viz:
+        save_dir = Path(save_viz)
+        save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Process each task
+    results = {}
+    for task_id in task_ids:
+        if task_id not in task_data:
+            print(f"Task ID {task_id} not found in {data_file}")
+            continue
+        
+        try:
+            # Process the task
+            print(f"\n==================================================")
+            print(f"Processing task: {task_id}")
+            print(f"==================================================")
+            
+            task_start_time = time.time()
+            
+            result = await process_single_task(
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=task_id,
+                k=k,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                concurrency=concurrency,
+                visualize=visualize,
+                save_dir=save_dir
+            )
+            
+            task_elapsed_time = time.time() - task_start_time
+            print(f"Task {task_id} completed in {task_elapsed_time:.2f}s")
+            
+            # Store the result
+            results[task_id] = result
+            
+            # Save results after each task if requested
+            if save_results:
+                with open(save_results, 'w') as f:
+                    json.dump(results, f, indent=2)
+                print(f"Saved results to {save_results}")
+            
+        except Exception as e:
+            print(f"Error processing task {task_id}: {e}")
+            import traceback
+            traceback.print_exc()
+            results[task_id] = {"error": str(e)}
+    
+    # Final save of results
+    if save_results:
+        with open(save_results, 'w') as f:
+            json.dump(results, f, indent=2)
+        print(f"Saved final results to {save_results}")
+    
+    return results
+
+def print_statistics(results: Dict[str, Any]):
+    """
+    Print statistics about the results.
+    
+    Args:
+        results: Dictionary mapping task IDs to results
+    """
+    if not results:
+        print("No results to analyze")
+        return
+    
+    total_tasks = len(results)
+    
+    # Count tasks with valid programs
+    tasks_with_valid_programs = sum(1 for task_id, result in results.items() 
+                                  if result.get("valid_programs", 0) > 0)
+    
+    # Count tasks with correct test predictions
+    correct_test_tasks = sum(1 for task_id, result in results.items() 
+                           if result.get("test_correct", False))
+    
+    # Calculate percentages
+    valid_programs_pct = (tasks_with_valid_programs / total_tasks) * 100 if total_tasks > 0 else 0
+    correct_test_pct = (correct_test_tasks / total_tasks) * 100 if total_tasks > 0 else 0
+    
+    # Calculate average number of valid programs per task
+    total_valid_programs = sum(result.get("valid_programs", 0) for result in results.values())
+    avg_valid_programs = total_valid_programs / total_tasks if total_tasks > 0 else 0
+    
+    # Print statistics
+    print("\n" + "=" * 60)
+    print("SUMMARY STATISTICS")
+    print("=" * 60)
+    print(f"Total tasks processed: {total_tasks}")
+    print(f"Tasks with valid programs: {tasks_with_valid_programs} ({valid_programs_pct:.1f}%)")
+    print(f"Tasks with correct test predictions: {correct_test_tasks} ({correct_test_pct:.1f}%)")
+    print(f"Average valid programs per task: {avg_valid_programs:.2f}")
+    
+    if total_tasks > 0:
+        print("\nTask success rates:")
+        print(f"  - pass@1 (equivalent): {correct_test_pct:.1f}%")
+    
+    print("=" * 60)
+
+async def main_async() -> int:
+    """Main async function."""
+    parser = argparse.ArgumentParser(description="Greenblatt-style ARC demo")
+    
+    # Task options
+    task_group = parser.add_mutually_exclusive_group()
+    task_group.add_argument("--task-id", type=str,
+                        help="Task ID to process")
+    task_group.add_argument("--task-file", type=str,
+                        help="Path to task list file")
+    task_group.add_argument("--debug", action="store_true",
+                        help="Debug mode with detailed logging")
+    
+    # Data options
+    parser.add_argument("--data-file", type=str, default="../arc-data-cleaned/arc-agi_evaluation_challenges.json",
+                        help="Path to data file")
+    parser.add_argument("--solutions-file", type=str,
+                        help="Path to solutions file")
+    
+    # Generation options
+    parser.add_argument("--k", type=int, default=8,
+                        help="Number of programs to generate per task")
+    parser.add_argument("--temperature", type=float, default=1.0,
+                        help="Temperature for generation")
+    parser.add_argument("--top-p", type=float, default=1.0,
+                        help="Top-p sampling parameter")
+    parser.add_argument("--top-k", type=int, default=40,
+                        help="Top-k sampling parameter")
+    parser.add_argument("--concurrency", type=int, default=32,
+                        help="Number of concurrent API calls")
+    
+    # Output options
+    parser.add_argument("--visualize", action="store_true",
+                        help="Visualize the results")
+    parser.add_argument("--save-results", type=str,
+                        help="Path to save results JSON")
+    parser.add_argument("--save-viz", type=str,
+                        help="Directory to save visualizations")
+    parser.add_argument("--max-tasks", type=int,
+                        help="Maximum number of tasks to process")
+    parser.add_argument("--no-sandbox", action="store_true",
+                        help="Use local Python executor with AST-based security instead of MCP sandbox")
+    
+    args = parser.parse_args()
+    
+    # Configure sandbox mode
+    set_use_local_executor(args.no_sandbox)
+    
+    try:
+        if args.task_id:
+            # Process a single task
+            print(f"Processing task: {args.task_id}")
+            
+            # Load task data
+            task_data = load_task_data(args.data_file)
+            print(f"Loaded task data from {args.data_file}")
+            
+            # Load solutions data if provided
+            solutions_data = {}
+            if args.solutions_file:
+                with open(args.solutions_file, 'r') as f:
+                    solutions_data = json.load(f)
+                print(f"Loaded solutions data from {args.solutions_file}")
+            else:
+                # Try to find solutions file based on data file
+                if 'challenges' in args.data_file:
+                    potential_solutions_file = args.data_file.replace('challenges', 'solutions')
+                    if os.path.exists(potential_solutions_file):
+                        with open(potential_solutions_file, 'r') as f:
+                            solutions_data = json.load(f)
+                        print(f"Automatically loaded solutions from {potential_solutions_file}")
+            
+            # Create save directory if needed
+            save_dir = None
+            if args.save_viz:
+                save_dir = Path(args.save_viz)
+                save_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Process the task
+            result = await process_single_task(
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=args.task_id,
+                k=args.k,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                concurrency=args.concurrency,
+                visualize=args.visualize,
+                save_dir=save_dir
+            )
+            
+            # Save results if requested
+            if args.save_results:
+                with open(args.save_results, 'w') as f:
+                    json.dump({args.task_id: result}, f, indent=2)
+                print(f"Saved results to {args.save_results}")
+            
+        elif args.debug:
+            # Debug mode
+            if not args.task_id:
+                print("Error: --task-id must be specified in debug mode")
+                return 1
+            
+            # Debug a single task
+            await debug_task(
+                task_id=args.task_id,
+                data_file=args.data_file,
+                solutions_file=args.solutions_file,
+                k=args.k,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                concurrency=args.concurrency,
+                save_results=args.save_results,
+                visualize=args.visualize,
+                save_viz=args.save_viz
+            )
+            
+        elif args.task_file:
+            # Process multiple tasks from a file
+            results = await process_task_file(
+                task_file=args.task_file,
+                task_ids_file=args.task_file,
+                k=args.k,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                concurrency=args.concurrency,
+                data_file=args.data_file,
+                solutions_file=args.solutions_file,
+                save_results=args.save_results,
+                visualize=args.visualize,
+                save_viz=args.save_viz,
+                max_tasks=args.max_tasks
+            )
+            
+            # Print statistics
+            print_statistics(results)
+        else:
+            print("Error: Either --task-id, --task-file, or --debug must be specified")
+            return 1
+            
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    finally:
+        # Clean up resources
+        await cleanup()
+    
+    return 0
+
+def main():
+    """Main entry point."""
+    try:
+        exit_code = asyncio.run(main_async())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+</cli/main.py>
+
+<README.md>
+# Greenblatt-style ARC Demo
+
+This project implements a Ryan-Greenblatt-style approach to solving Abstraction and Reasoning Corpus (ARC) tasks. It uses LLMs to generate many program candidates, filters them based on training examples, and uses majority voting to determine the final output.
+
+## Overview
+
+The Greenblatt approach works as follows:
+
+1. **Program Generation**: Generate many program candidates using an LLM (Gemini Flash 2.0)
+2. **Filtering**: Test each program against training examples and filter out invalid ones
+3. **Majority Voting**: Run all valid programs on the test input and take the majority vote as the final output
+
+## Project Structure Explanation
+
+- `core/`: Contains the core functionality for program generation and evaluation
+- `sandbox/`: Handles safe execution of generated code
+- `viz/`: Provides visualization tools for ARC grids
+- `cli/`: Contains the command-line interface
+- `agent/`: Empty placeholder for potential future extensions (not currently used)
+
+## Setup
+
+1. Install dependencies:
+```bash
+uv init
+uv add httpx openai pydantic-ai-slim numpy matplotlib tqdm orjson ujson mcp
+```
+
+2. Create a `.env` file with your OpenRouter API key:
+```
+OPENROUTER_API_KEY=your_api_key_here
+```
+
+## Usage
+
+Run the main script from the `greenblatt` directory:
+```bash
+uv run --with mcp main.py --task-id <task_id> --k <num_programs> [--visualize]
+```
+
+### Parameters
+
+- `--task-id`: ID of the ARC task to solve (e.g., "00576224")
+- `--k`: Number of programs to generate (default: 8)
+- `--concurrency`: Number of concurrent API calls (default: 32)
+- `--temperature`: Temperature for generation (default: 1.0)
+- `--visualize`: Flag to visualize the task and solutions
+
+## MCP Server Setup
+
+Before running the demo with the default sandbox mode, you need to set up the MCP server for sandboxed code execution in a separate terminal:
+
+1. Install Deno if you don't have it already:
+```bash
+curl -fsSL https://deno.land/install.sh | sh
+```
+
+2. Start the MCP server using stdio transport in a separate terminal:
+```bash
+deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydantic/mcp-run-python stdio
+```
+
+**Important**: Keep this server running in a separate terminal while using the demo with the default sandbox mode. The sandbox runner will connect to this server to execute the generated code safely.
+
+## Sandbox Options
+
+The system supports two different execution environments for running generated programs:
+
+### MCP Sandbox (Default)
+
+By default, the system uses the MCP sandbox for code execution, which provides strong isolation but requires a separate MCP server to be running (see MCP Server Setup above).
+
+### Local Executor (--no-sandbox)
+
+For faster execution, you can use the `--no-sandbox` flag to run code in a lightweight local executor:
+
+```bash
+uv run main.py --task-id 00576224 --k 8 --visualize --no-sandbox
+```
+
+The local executor:
+- Uses AST-based security to restrict imports and dangerous operations
+- Runs code directly in the Python process without the overhead of the MCP server
+- Is significantly faster than the MCP sandbox, especially for batch processing
+- Automatically handles type annotations from the generated code
+
+Note: The local executor is not a full sandbox and should only be used in trusted environments.
+
+## Visualization
+
+The `--visualize` flag will display the input grids, expected output grids (if available), and the candidate output grid. If `--save-viz` is specified, the visualizations will be saved to the specified directory.
+
+The visualization includes:
+- Training examples with input and expected output
+- Test examples with input and expected output (if available)
+- Candidate output with an indicator showing whether it's correct (✓) or incorrect (✗)
+
+## Evaluation Methodology
+
+### Valid Programs
+
+A program is considered "valid" if:
+1. It runs without errors
+2. It produces the correct output for **all** training examples
+
+### Task Solution
+
+A task is considered "solved" if:
+1. There are valid programs
+2. The majority vote of those valid programs produces the correct output for the test example
+
+### Pass@K Evaluation
+
+This implementation uses a simplified approach that approximates pass@1 evaluation:
+- We generate K programs for each task
+- We check how many of those programs are valid
+- We use a majority vote among valid programs to determine the final output
+
+Note that this differs from the standard ARC pass@K methodology, which involves multiple independent runs and a more sophisticated statistical analysis. The standard ARC evaluation typically measures the probability of solving a task with K attempts.
+
+## Performance Tuning
+
+- **Generation Parameters**: Adjust `--k` and `--concurrency` based on your needs and rate limits
+- **Temperature**: Higher values (e.g., 1.0) produce more diverse programs, lower values produce more focused ones
+- **Concurrency**: Adjust based on your API rate limits and available resources
+
+## Cost Management
+
+The demo uses OpenRouter to access Gemini Flash 2.0, which has the following approximate pricing:
+- Input tokens: ~$0.075/M
+- Output tokens: ~$0.30/M
+
+To manage costs:
+- Start with smaller `--k` values (e.g., 50-100) for testing
+- Use the `--task-id` option to run on a single task first
+- Monitor token usage in the console output
+
+## Troubleshooting
+
+- **API Key Issues**: Ensure your OpenRouter API key is correctly set
+- **Deno Installation**: If you encounter issues with Deno, install it manually:
+  ```bash
+  curl -fsSL https://deno.land/install.sh | sh
+  ```
+- **Memory Issues**: If you encounter memory issues, reduce the `--k` value
+
+## Examples
+
+### Example 1: Running on a Single Task
+
+```bash
+uv run main.py --task-id 00576224 --k 8 --visualize --no-sandbox
+```
+
+### Example 2: Running on MIT-Easy Tasks
+
+```bash
+uv run main.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --k 8 --concurrency 32 --save-results results/mit_easy_results.json --visualize --save-viz visualizations/mit_easy/ --no-sandbox
+```
+
+### Example 3: Custom Data File
+
+```bash
+uv run main.py --task-id 00576224 --data-file ../arc-data-cleaned/arc-agi_training_challenges.json --k 8 --visualize --no-sandbox
+```
+
+### Example 3: Analyzing Performance with Different k Values
+
+To analyze how performance varies with different values of k, you can use the `run_k_analysis.py` script:
+
+```bash
+uv run run_k_analysis.py --task-file ../arc-data/mit-easy.json --data-file ../arc-data-cleaned/arc-agi_evaluation_challenges.json --solutions-file ../arc-data-cleaned/arc-agi_evaluation_solutions.json --k-values 2,8,32 --concurrency 32 --output-dir results/k_analysis --no-sandbox
+```
+
+This will:
+1. Run the specified tasks with k=2, k=8, and k=32
+2. Save the results for each k value in the output directory
+3. Generate a plot showing how the number of correct tasks varies with k
+4. Print a summary of the results
+
+The script uses our majority voting approach, which is more strict than the standard pass@k metric used in ARC benchmarks. In our approach, a task is only considered correct if the majority of valid programs produce the correct output.
+
+</README.md>
+
+<viz/show_grids.py>
+"""show_grids.py – quick matplotlib visualizer
+
+Usage: python -m greenblatt.viz.show_grids path/to/task.json
+
+Draws: input(s), expected output(s), candidate LLM output
+"""
+import json
+import sys
+import argparse
+import time
+from pathlib import Path
+from typing import List, Dict, Any, Optional, Union
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+# ARC colors (10 colors for indices 0-9)
+ARC_COLORS = [
+    "#000000",  # 0: Black
+    "#0074D9",  # 1: Blue
+    "#FF4136",  # 2: Red
+    "#2ECC40",  # 3: Green
+    "#FFDC00",  # 4: Yellow
+    "#AAAAAA",  # 5: Gray
+    "#F012BE",  # 6: Magenta
+    "#FF851B",  # 7: Orange
+    "#7FDBFF",  # 8: Light Blue
+    "#870C25",  # 9: Brown
+]
+
+# Create the colormap once
+ARC_COLORMAP = ListedColormap(ARC_COLORS)
+
+def pad_grid(grid: List[List[int]], max_rows: int, max_cols: int) -> np.ndarray:
+    """Pad a grid to the specified dimensions."""
+    grid_array = np.array(grid, dtype=np.int8)
+    rows, cols = grid_array.shape
+    
+    if rows < max_rows or cols < max_cols:
+        padded = np.zeros((max_rows, max_cols), dtype=np.int8)
+        padded[:rows, :cols] = grid_array
+        return padded
+    
+    return grid_array
+
+def plot_grid(ax, grid: Union[List[List[int]], np.ndarray], title: str = None, border_color: Optional[str] = None):
+    """Plot a single grid on the given axis."""
+    # Convert to numpy array if not already
+    if not isinstance(grid, np.ndarray):
+        grid_array = np.array(grid, dtype=np.int8)
+    else:
+        grid_array = grid
+    
+    # Plot the grid using the global colormap
+    ax.imshow(grid_array, cmap=ARC_COLORMAP, vmin=0, vmax=9)
+    
+    # Add grid lines
+    ax.grid(color='black', linestyle='-', linewidth=0.5)
+    
+    # Set ticks and labels
+    ax.set_xticks(np.arange(-0.5, grid_array.shape[1], 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, grid_array.shape[0], 1), minor=True)
+    ax.set_xticks(np.arange(0, grid_array.shape[1], 1))
+    ax.set_yticks(np.arange(0, grid_array.shape[0], 1))
+    
+    # Remove tick labels
+    ax.set_xticklabels([])
+    ax.set_yticklabels([])
+    
+    # Add title
+    if title:
+        ax.set_title(title)
+    
+    # Add colored border if specified
+    if border_color:
+        for spine in ax.spines.values():
+            spine.set_edgecolor(border_color)
+            spine.set_linewidth(3)
+        ax.set_frame_on(True)
+    else:
+        # Turn off axis
+        ax.axis('off')
+
+def grid_equals(grid1: Union[List[List[int]], np.ndarray], grid2: Union[List[List[int]], np.ndarray]) -> bool:
+    """Check if two grids are equal."""
+    # Convert to numpy arrays for comparison if not already
+    if not isinstance(grid1, np.ndarray):
+        array1 = np.array(grid1)
+    else:
+        array1 = grid1
+        
+    if not isinstance(grid2, np.ndarray):
+        array2 = np.array(grid2)
+    else:
+        array2 = grid2
+    
+    # Check if shapes match
+    if array1.shape != array2.shape:
+        return False
+    
+    # Compare all elements
+    return np.array_equal(array1, array2)
+
+def visualize_task(
+    task_data: Dict[str, Any], 
+    solutions_data: Dict[str, Any],
+    task_id: str, 
+    candidate_output: Optional[List[List[int]]] = None,
+    valid_programs: Optional[List[str]] = None,
+    save_path: Optional[str] = None,
+    training_predictions: Optional[Dict[str, List[List[List[int]]]]] = None
+):
+    """
+    Visualize a task with input, expected output, and candidate output.
+    
+    Args:
+        task_data: Dictionary of task data
+        solutions_data: Dictionary of solutions data
+        task_id: Task ID
+        candidate_output: Optional candidate output for test example
+        valid_programs: Optional list of valid programs to visualize training predictions
+        save_path: Optional path to save the visualization
+        training_predictions: Optional dictionary mapping programs to their training predictions
+    """
+    viz_start_time = time.time()
+    
+    # Convert all grids to numpy arrays upfront to avoid repeated conversions
+    train_examples = task_data[task_id]["train"]
+    test_examples = task_data[task_id]["test"]
+    
+    # Pre-convert all grids to numpy arrays
+    for example in train_examples:
+        example["input_array"] = np.array(example["input"], dtype=np.int8)
+        example["output_array"] = np.array(example["output"], dtype=np.int8)
+    
+    for example in test_examples:
+        example["input_array"] = np.array(example["input"], dtype=np.int8)
+        if "output" in example:
+            example["output_array"] = np.array(example["output"], dtype=np.int8)
+    
+    # Convert candidate output if provided
+    candidate_output_array = None
+    if candidate_output is not None:
+        candidate_output_array = np.array(candidate_output, dtype=np.int8)
+    
+    # Get ground truth for test examples from solutions data if available
+    test_ground_truth = {}
+    test_ground_truth_arrays = {}
+    if task_id in solutions_data:
+        # The solutions data is just an array of outputs
+        if isinstance(solutions_data[task_id], list) and len(solutions_data[task_id]) > 0:
+            for i, solution in enumerate(solutions_data[task_id]):
+                if i < len(test_examples):
+                    test_ground_truth[i] = solution
+                    test_ground_truth_arrays[i] = np.array(solution, dtype=np.int8)
+    
+    # Check if we have valid programs and training predictions
+    has_training_predictions = False
+    program_training_outputs = []
+    program_training_arrays = []
+    
+    if valid_programs and len(valid_programs) > 0 and training_predictions:
+        # Use the first valid program's training predictions
+        first_valid_program = valid_programs[0]
+        if first_valid_program in training_predictions:
+            program_training_outputs = training_predictions[first_valid_program]
+            # Pre-convert training predictions to numpy arrays
+            for output in program_training_outputs:
+                if output is not None:
+                    program_training_arrays.append(np.array(output, dtype=np.int8))
+                else:
+                    program_training_arrays.append(None)
+            has_training_predictions = len(program_training_outputs) > 0
+    
+    # Determine the number of rows in the figure
+    n_rows = len(train_examples) + len(test_examples)
+    
+    # Determine the number of columns (3 for standard, 4 if showing training predictions)
+    n_cols = 4 if has_training_predictions else 3
+    
+    # Use a smaller figure size to reduce memory usage
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3 * n_rows), dpi=80)
+    
+    # If there's only one row, wrap axes in a list
+    if n_rows == 1:
+        axes = [axes]
+    
+    # Add a title to the figure - position it to avoid overlap
+    fig.suptitle(f"Task: {task_id}", fontsize=14, y=0.98)
+    
+    # Plot training examples
+    for i, example in enumerate(train_examples):
+        plot_grid(axes[i][0], example["input_array"], f"Train {i+1} Input")
+        plot_grid(axes[i][1], example["output_array"], f"Train {i+1} Expected Output")
+        
+        # If we have training predictions, show them
+        if has_training_predictions and i < len(program_training_arrays) and program_training_arrays[i] is not None:
+            # Check if prediction matches expected output
+            is_correct = np.array_equal(program_training_arrays[i], example["output_array"])
+            
+            # Add a title that indicates correctness
+            title = f"Train {i+1} Prediction ({'✓' if is_correct else '✗'})"
+            
+            # Plot with a green or red border based on correctness
+            border_color = 'green' if is_correct else 'red'
+            plot_grid(axes[i][2], program_training_arrays[i], title, border_color)
+        else:
+            axes[i][2].axis('off')
+        
+        # Turn off the last column if we're using 4 columns for training examples
+        if n_cols == 4:
+            axes[i][3].axis('off')
+    
+    # Plot test examples
+    for i, example in enumerate(test_examples):
+        row_idx = len(train_examples) + i
+        plot_grid(axes[row_idx][0], example["input_array"], f"Test {i+1} Input")
+        
+        # Check if we have ground truth from solutions data
+        ground_truth_available = i in test_ground_truth
+        
+        # Always show the expected output column for test examples
+        if ground_truth_available:
+            plot_grid(axes[row_idx][1], test_ground_truth_arrays[i], f"Test {i+1} Ground Truth")
+        elif "output_array" in example:
+            plot_grid(axes[row_idx][1], example["output_array"], f"Test {i+1} Expected Output")
+        else:
+            axes[row_idx][1].text(0.5, 0.5, "Ground Truth Not Available", 
+                                 horizontalalignment='center', verticalalignment='center',
+                                 transform=axes[row_idx][1].transAxes)
+            axes[row_idx][1].axis('on')
+        
+        # If we have a candidate output
+        if candidate_output_array is not None:
+            # Determine if the candidate output is correct (if ground truth is available)
+            is_correct = False
+            if ground_truth_available:
+                is_correct = np.array_equal(candidate_output_array, test_ground_truth_arrays[i])
+            elif "output_array" in example:
+                is_correct = np.array_equal(candidate_output_array, example["output_array"])
+            
+            # Add a title that indicates correctness if we know
+            title = f"Test {i+1} Candidate Output"
+            if ground_truth_available or "output_array" in example:
+                title += f" ({'✓' if is_correct else '✗'})"
+            
+            # Plot with a green or red border based on correctness
+            border_color = None
+            if ground_truth_available or "output_array" in example:
+                border_color = 'green' if is_correct else 'red'
+            
+            plot_grid(axes[row_idx][2], candidate_output_array, title, border_color)
+        else:
+            axes[row_idx][2].axis('off')
+        
+        # Turn off the last column if we're using 4 columns
+        if n_cols == 4:
+            axes[row_idx][3].axis('off')
+    
+    # Use a simpler layout adjustment instead of tight_layout
+    plt.subplots_adjust(hspace=0.4, wspace=0.3, top=0.95, bottom=0.05, left=0.05, right=0.95)
+    
+    # Save or show the figure
+    if save_path:
+        plt.savefig(save_path, dpi=80, bbox_inches=None)
+    else:
+        plt.show()
+    
+    # Close the figure to free memory
+    plt.close(fig)
+    
+    viz_time = time.time() - viz_start_time
+    print(f"Visualization completed in {viz_time:.2f}s")
+
+def load_task_data(task_file: str) -> Dict[str, Any]:
+    """Load task data from a JSON file."""
+    with open(task_file, 'r') as f:
+        return json.load(f)
+
+def load_solutions_data(solutions_file: str) -> Dict[str, Any]:
+    """Load solutions data from a JSON file."""
+    with open(solutions_file, 'r') as f:
+        return json.load(f)
+
+def main():
+    """Main function for command-line usage."""
+    parser = argparse.ArgumentParser(description="Visualize ARC tasks")
+    parser.add_argument("task_file", help="Path to the task JSON file")
+    parser.add_argument("--solutions-file", help="Path to the solutions JSON file")
+    parser.add_argument("--task-id", help="Specific task ID to visualize")
+    parser.add_argument("--output-dir", help="Directory to save visualizations")
+    args = parser.parse_args()
+    
+    # Load task data
+    task_data = load_task_data(args.task_file)
+    
+    # Load solutions data if provided
+    solutions_data = {}
+    if args.solutions_file:
+        solutions_data = load_solutions_data(args.solutions_file)
+    
+    # Create output directory if needed
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(exist_ok=True, parents=True)
+    
+    # If task ID is provided, visualize only that task
+    if args.task_id:
+        if args.task_id not in task_data:
+            print(f"Task ID {args.task_id} not found in task data")
+            return
+        
+        save_path = None
+        if args.output_dir:
+            save_path = str(Path(args.output_dir) / f"{args.task_id}.png")
+        
+        visualize_task(
+            task_data=task_data,
+            solutions_data=solutions_data,
+            task_id=args.task_id,
+            save_path=save_path
+        )
+    else:
+        # Visualize all tasks
+        for task_id in task_data:
+            print(f"Visualizing task {task_id}")
+            
+            save_path = None
+            if args.output_dir:
+                save_path = str(Path(args.output_dir) / f"{task_id}.png")
+            
+            visualize_task(
+                task_data=task_data,
+                solutions_data=solutions_data,
+                task_id=task_id,
+                save_path=save_path
+            )
+
+if __name__ == "__main__":
+    main()
+
+</viz/show_grids.py>
+
+<viz/__init__.py>
+"""Visualization utilities for Greenblatt-style ARC demo."""
+
+</viz/__init__.py>
+
+<check_solutions.py>
+#!/usr/bin/env python3
+"""
+Check the structure of the solutions file.
+"""
+import json
+import sys
+from pathlib import Path
+
+# Load the solutions data
+solutions_file = Path("../arc-data-cleaned/arc-agi_evaluation_solutions.json")
+with open(solutions_file, "r") as f:
+    solutions_data = json.load(f)
+
+# Get the task ID from command line or use default
+task_id = sys.argv[1] if len(sys.argv) > 1 else "00576224"
+
+# Check if the task ID exists in the solutions data
+print(f"Task ID: {task_id}")
+print(f"Task exists in solutions: {task_id in solutions_data}")
+
+if task_id in solutions_data:
+    print(f"\nSolutions data structure for task {task_id}:")
+    print(json.dumps(solutions_data[task_id], indent=2))
+    
+    # Check if test examples have output
+    if "test" in solutions_data[task_id]:
+        for i, example in enumerate(solutions_data[task_id]["test"]):
+            print(f"\nTest example {i+1} has output: {'output' in example}")
+            if "output" in example:
+                print(f"Output: {example['output']}")
+    else:
+        print("\nNo test examples found in solutions data")
+else:
+    print("\nTask not found in solutions data")
+
+</check_solutions.py>
+
+<sandbox/runner.py>
+"""runner.py – wrapper around MCP:run-python with local executor option
+
+Uses either:
+1. MCP client with stdio transport to connect to a running Deno MCP server (default)
+2. Local Python executor with AST-based security for faster execution (with --no-sandbox flag)
+"""
+import asyncio
+import json
+import hashlib
+import time
+from typing import List, Optional, Dict, Any, Tuple
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+# Import local executor
+from sandbox.local_executor import run_batch_programs_local, run_in_local_sandbox
+
+# Server parameters for the MCP Run Python server
+SERVER_PARAMS = StdioServerParameters(
+    command='deno',
+    args=[
+        'run',
+        '-N',
+        '-R=node_modules',
+        '-W=node_modules',
+        '--node-modules-dir=auto',
+        'jsr:@pydantic/mcp-run-python',
+        'stdio',
+    ],
+)
+
+# Global cache for storing results
+RESULT_CACHE: Dict[str, List[Optional[List[List[int]]]]] = {}
+
+# Global flag to control whether to use the local executor
+USE_LOCAL_EXECUTOR = False
+
+def set_use_local_executor(use_local: bool):
+    """Set whether to use the local executor instead of MCP sandbox."""
+    global USE_LOCAL_EXECUTOR
+    USE_LOCAL_EXECUTOR = use_local
+    if use_local:
+        print("Using local Python executor with AST-based security")
+    else:
+        print("Using MCP sandbox for code execution")
+
+def hash_input(input_grid: List[List[int]]) -> str:
+    """Create a hash of an input grid for caching."""
+    return hashlib.md5(json.dumps(input_grid).encode()).hexdigest()
+
+def hash_program(code: str) -> str:
+    """Create a hash of a program for caching."""
+    # Normalize whitespace to avoid trivial differences
+    normalized = "\n".join(line.strip() for line in code.strip().split("\n") if line.strip())
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+def get_cache_key(code: str, input_grid: List[List[int]]) -> str:
+    """Create a cache key from program and input hashes."""
+    program_hash = hash_program(code)
+    input_hash = hash_input(input_grid)
+    return f"{program_hash}_{input_hash}"
+
+async def run_in_sandbox(code: str, inputs: List[List[List[int]]], timeout: float = 3.0) -> List[Optional[List[List[int]]]]:
+    """
+    Run the provided code in a sandbox and return the results.
+    
+    Args:
+        code: The Python code string containing a solve function
+        inputs: A list of input grids to test
+        timeout: Maximum execution time in seconds
+        
+    Returns:
+        A list of output grids or None for each input if execution failed
+    """
+    # Check if we should use the local executor
+    if USE_LOCAL_EXECUTOR:
+        # Use the local executor
+        return await run_in_local_sandbox(code, inputs)
+    
+    # Check cache for all inputs
+    all_cached = True
+    results = [None] * len(inputs)
+    cache_keys = []
+    
+    for i, input_grid in enumerate(inputs):
+        cache_key = get_cache_key(code, input_grid)
+        cache_keys.append(cache_key)
+        
+        if cache_key in RESULT_CACHE:
+            results[i] = RESULT_CACHE[cache_key]
+        else:
+            all_cached = False
+    
+    # If all results are cached, return them
+    if all_cached:
+        return results
+    
+    # Prepare the full code with minimal wrapper
+    # The code should already contain a solve function and any necessary imports
+    full_code = f"""
+# /// script
+# dependencies = []
+# ///
+
+{code}
+
+# Run tests on the provided inputs
+import json
+inputs = {json.dumps(inputs)}
+results = []
+for inp in inputs:
+    try:
+        result = solve(inp)
+        results.append(result)
+    except Exception as e:
+        print(f"Error: {{e}}")
+        results.append(None)
+
+# Output results as JSON
+print(json.dumps(results))
+"""
+    
+    try:
+        # Connect to the running MCP server
+        async with stdio_client(SERVER_PARAMS) as (read, write):
+            async with ClientSession(read, write) as session:
+                # Initialize the session
+                await session.initialize()
+                
+                # Execute the code in the sandbox with timeout
+                try:
+                    result = await asyncio.wait_for(
+                        session.call_tool('run_python_code', {'python_code': full_code}),
+                        timeout=timeout
+                    )
+                    
+                    # Get the output text
+                    output_text = result.content[0].text
+                    
+                    # Parse the output to extract the JSON results
+                    try:
+                        # Look for JSON array in the output
+                        for line in output_text.splitlines():
+                            line = line.strip()
+                            if line.startswith('[') and line.endswith(']'):
+                                parsed_results = json.loads(line)
+                                
+                                # Cache individual results
+                                for i, (result, input_grid) in enumerate(zip(parsed_results, inputs)):
+                                    if result is not None:
+                                        RESULT_CACHE[cache_keys[i]] = result
+                                
+                                return parsed_results
+                        
+                        # If we couldn't find a JSON array, check for output tags
+                        if "<o>" in output_text:
+                            output_start = output_text.find("<o>") + len("<o>")
+                            output_end = output_text.find("</o>")
+                            if output_start >= 0 and output_end >= 0:
+                                output_content = output_text[output_start:output_end].strip()
+                                
+                                # Look for JSON array in the output content
+                                for line in output_content.splitlines():
+                                    line = line.strip()
+                                    if line.startswith('[') and line.endswith(']'):
+                                        parsed_results = json.loads(line)
+                                        
+                                        # Cache individual results
+                                        for i, (result, input_grid) in enumerate(zip(parsed_results, inputs)):
+                                            if result is not None:
+                                                RESULT_CACHE[cache_keys[i]] = result
+                                        
+                                        return parsed_results
+                        
+                        # Check for errors
+                        if "<e>" in output_text:
+                            error_start = output_text.find("<e>") + len("<e>")
+                            error_end = output_text.find("</e>")
+                            if error_start >= 0 and error_end >= 0:
+                                error_content = output_text[error_start:error_end].strip()
+                                print(f"Execution error: {error_content}")
+                        
+                        # If we couldn't extract results, return None for each input
+                        print(f"Could not parse output: {output_text}")
+                        return [None] * len(inputs)
+                        
+                    except json.JSONDecodeError as e:
+                        print(f"Error parsing JSON output: {e}")
+                        return [None] * len(inputs)
+                        
+                except asyncio.TimeoutError:
+                    print(f"Execution timed out after {timeout} seconds")
+                    return [None] * len(inputs)
+    
+    except Exception as e:
+        print(f"MCP execution error: {e}")
+        return [None] * len(inputs)
+
+async def run_batch_programs(programs: List[str], inputs: List[List[List[int]]]) -> Dict[str, List[Optional[List[List[int]]]]]:
+    """
+    Run multiple programs in a single sandbox session, but execute each program individually.
+    
+    Args:
+        programs: List of Python code strings containing solve functions
+        inputs: A list of input grids to test
+        
+    Returns:
+        Dictionary mapping program indices to their results
+    """
+    # Check if we should use the local executor
+    if USE_LOCAL_EXECUTOR:
+        # Use the local executor for batch processing
+        return await run_batch_programs_local(programs, inputs)
+    
+    print(f"Starting batch execution of {len(programs)} programs on {len(inputs)} inputs at {time.strftime('%H:%M:%S')}")
+    start_time = time.time()
+    
+    if not programs:
+        return {}
+    
+    # Check cache for all program-input combinations
+    all_cached = True
+    results = {i: [None] * len(inputs) for i in range(len(programs))}
+    cache_keys = {}
+    
+    print("Checking cache for program-input combinations...")
+    cache_start_time = time.time()
+    for i, program in enumerate(programs):
+        cache_keys[i] = []
+        for j, input_grid in enumerate(inputs):
+            cache_key = get_cache_key(program, input_grid)
+            cache_keys[i].append(cache_key)
+            
+            if cache_key in RESULT_CACHE:
+                results[i][j] = RESULT_CACHE[cache_key]
+            else:
+                all_cached = False
+    
+    cache_time = time.time() - cache_start_time
+    print(f"Cache check completed in {cache_time:.2f}s")
+    
+    # If all results are cached, return them
+    if all_cached:
+        print("All results found in cache, skipping sandbox execution")
+        return results
+    
+    print(f"Connecting to MCP server at {time.strftime('%H:%M:%S')}...")
+    connect_start_time = time.time()
+    try:
+        # Connect to the running MCP server
+        async with stdio_client(SERVER_PARAMS) as (read, write):
+            connect_time = time.time() - connect_start_time
+            print(f"Connected to MCP server in {connect_time:.2f}s")
+            
+            async with ClientSession(read, write) as session:
+                # Initialize the session
+                print(f"Initializing MCP session at {time.strftime('%H:%M:%S')}...")
+                init_start_time = time.time()
+                await session.initialize()
+                init_time = time.time() - init_start_time
+                print(f"Session initialized in {init_time:.2f}s")
+                
+                # Execute each program individually using the same session
+                for i, program in enumerate(programs):
+                    # Skip if all results for this program are already cached
+                    if all(results[i][j] is not None for j in range(len(inputs))):
+                        print(f"Program {i} results all cached, skipping execution")
+                        continue
+                    
+                    print(f"Preparing code for program {i}...")
+                    # Prepare the code for this program
+                    program_code = f"""
+# /// script
+# dependencies = []
+# ///
+
+{program}
+
+import json
+import traceback
+import time
+
+# Run tests on the provided inputs
+inputs = {json.dumps(inputs)}
+results = []
+
+for inp_idx, inp in enumerate(inputs):
+    try:
+        start_time = time.time()
+        result = solve(inp)
+        elapsed = time.time() - start_time
+        if elapsed > 0.1:  # Log slow executions
+            print(f"Input {{inp_idx}} took {{elapsed:.2f}}s")
+        results.append(result)
+    except Exception as e:
+        print(f"Error on input {{inp_idx}}: {{e}}")
+        traceback.print_exc()
+        results.append(None)
+
+# Output results as JSON
+print(json.dumps(results))
+"""
+                    
+                    # Execute the code in the sandbox with timeout
+                    try:
+                        print(f"Executing program {i} in sandbox with 1.5s timeout at {time.strftime('%H:%M:%S')}...")
+                        execution_start = time.time()
+                        result = await asyncio.wait_for(
+                            session.call_tool('run_python_code', {'python_code': program_code}),
+                            timeout=1.5
+                        )
+                        execution_time = time.time() - execution_start
+                        print(f"Program {i} execution completed in {execution_time:.2f}s")
+                        
+                        # Get the output text
+                        output_text = result.content[0].text
+                        
+                        # Parse the output to extract the JSON results
+                        try:
+                            # Look for JSON array in the output
+                            program_results = None
+                            for line in output_text.splitlines():
+                                line = line.strip()
+                                if line.startswith('[') and line.endswith(']'):
+                                    program_results = json.loads(line)
+                                    break
+                            
+                            # If we couldn't find a JSON array, check for output tags
+                            if program_results is None and "<o>" in output_text:
+                                output_start = output_text.find("<o>") + len("<o>")
+                                output_end = output_text.find("</o>")
+                                if output_start >= 0 and output_end >= 0:
+                                    output_content = output_text[output_start:output_end].strip()
+                                    
+                                    # Look for JSON array in the output content
+                                    for line in output_content.splitlines():
+                                        line = line.strip()
+                                        if line.startswith('[') and line.endswith(']'):
+                                            program_results = json.loads(line)
+                                            break
+                            
+                            # Check for errors
+                            if program_results is None and "<e>" in output_text:
+                                error_start = output_text.find("<e>") + len("<e>")
+                                error_end = output_text.find("</e>")
+                                if error_start >= 0 and error_end >= 0:
+                                    error_content = output_text[error_start:error_end].strip()
+                                    print(f"Execution error for program {i}: {error_content}")
+                            
+                            # Store and cache results if found
+                            if program_results:
+                                results[i] = program_results
+                                # Cache individual results
+                                for input_idx, result in enumerate(program_results):
+                                    if result is not None:
+                                        RESULT_CACHE[cache_keys[i][input_idx]] = result
+                            else:
+                                print(f"Could not parse output for program {i}: {output_text[:200]}...")
+                                
+                        except json.JSONDecodeError as e:
+                            print(f"Error parsing JSON output for program {i}: {e}")
+                            # Program results remain as None for this program
+                            
+                    except asyncio.TimeoutError:
+                        execution_time = time.time() - execution_start
+                        print(f"Program {i} execution timed out after {execution_time:.2f}s (timeout was 1.5s)")
+                        # Results remain as None for this program
+                        
+                    except Exception as e:
+                        print(f"Error executing program {i}: {e}")
+                        # Results remain as None for this program
+                
+                total_time = time.time() - start_time
+                print(f"Batch execution completed in {total_time:.2f}s")
+                return results
+    
+    except Exception as e:
+        connect_time = time.time() - connect_start_time
+        print(f"MCP execution error after {connect_time:.2f}s: {e}")
+        return {i: [None] * len(inputs) for i in range(len(programs))}
+
+async def cleanup():
+    """
+    Dummy cleanup function to maintain compatibility with the main script.
+    
+    With the simplified implementation, there's no persistent state to clean up,
+    but we keep this function for API compatibility.
+    """
+    pass
+
+</sandbox/runner.py>
+
+<sandbox/__init__.py>
+"""Sandbox execution functionality for Greenblatt-style ARC demo."""
+
+</sandbox/__init__.py>
+
+<sandbox/local_executor.py>
+"""local_executor.py – lightweight Python code execution with AST-based security
+
+A minimal "smol-agents" style executor that provides basic security through AST validation
+without the overhead of a full sandbox.
+"""
+import ast
+import builtins
+import types
+import sys
+import json
+import asyncio
+import time
+import re
+from typing import List, Dict, Any, Optional
+
+
+class LocalPythonExecutor:
+    def __init__(self, allowed_imports=None, max_ops=1_000_000, debug=False):
+        # Default allowed imports
+        default_allowed = ["numpy", "math", "random", "copy", "collections", "itertools", "functools"]
+        self.allowed = set(allowed_imports or default_allowed)
+        self.max_ops = max_ops
+        self.debug = debug
+
+    def __call__(self, code: str, globals_dict=None):
+        """Execute code in a restricted environment."""
+        if self.debug:
+            print("\nOriginal code:")
+            print(code[:500] + "..." if len(code) > 500 else code)
+            
+        # Remove typing imports
+        code = re.sub(r'from\s+typing\s+import\s+[^\n]+', '', code)
+        code = re.sub(r'import\s+typing', '', code)
+        
+        # Create a safe globals dictionary
+        globals_env = self._create_safe_globals()
+        if globals_dict is not None:
+            globals_env.update(globals_dict)
+            
+        # Execute the code
+        try:
+            exec(code, globals_env)
+            
+            if self.debug:
+                print(f"\nExecution successful. Available functions: {[k for k, v in globals_env.items() if callable(v)]}")
+                
+            return globals_env
+        except Exception as e:
+            if self.debug:
+                print(f"\nExecution failed: {e}")
+                import traceback
+                traceback.print_exc()
+            raise
+
+    def _create_safe_globals(self):
+        """Create a safe globals dictionary with limited builtins."""
+        # Create a restricted __builtins__ with only safe functions
+        safe_builtins = {
+            'abs': abs, 'all': all, 'any': any, 'bool': bool, 
+            'dict': dict, 'enumerate': enumerate, 'filter': filter,
+            'float': float, 'int': int, 'len': len, 'list': list, 
+            'map': map, 'max': max, 'min': min, 'print': print,
+            'range': range, 'round': round, 'set': set, 'sorted': sorted,
+            'str': str, 'sum': sum, 'tuple': tuple, 'zip': zip
+        }
+        
+        # Add typing-related names that are commonly used
+        from typing import List, Dict, Tuple, Set, Optional, Any, Union
+        typing_names = {
+            'List': List, 'Dict': Dict, 'Tuple': Tuple, 'Set': Set,
+            'Optional': Optional, 'Any': Any, 'Union': Union
+        }
+        
+        # Create the globals dictionary
+        globals_dict = {'__builtins__': safe_builtins}
+        globals_dict.update(typing_names)
+        
+        # Add allowed modules
+        for module_name in self.allowed:
+            try:
+                module = __import__(module_name)
+                globals_dict[module_name] = module
+            except ImportError:
+                if self.debug:
+                    print(f"Could not import {module_name}")
+        
+        return globals_dict
+
+
+async def run_in_local_sandbox(code: str, inputs: List[List[List[int]]], timeout: float = 1.5, debug: bool = False) -> List[Optional[List[List[int]]]]:
+    """
+    Run the provided code in the local executor and return the results.
+    
+    Args:
+        code: The Python code string containing a solve function
+        inputs: A list of input grids to test
+        timeout: Maximum execution time in seconds (default: 1.5s)
+        debug: Whether to print debug information
+        
+    Returns:
+        A list of output grids or None for each input if execution failed
+    """
+    # Create a local executor
+    executor = LocalPythonExecutor(debug=debug)
+    
+    results = []
+    
+    # Execute the code to get the solve function
+    try:
+        globals_dict = executor(code)
+        solve_func = globals_dict.get('solve')
+        
+        if not solve_func or not callable(solve_func):
+            print("Error: No valid 'solve' function found in the code")
+            if debug:
+                print(f"Available globals: {[k for k, v in globals_dict.items() if callable(v)]}")
+            return [None] * len(inputs)
+        
+        # Process each input with a timeout
+        for input_idx, input_grid in enumerate(inputs):
+            try:
+                if debug:
+                    print(f"Running solve function on input {input_idx}")
+                
+                # Use asyncio.to_thread to run the solve function in a separate thread with timeout
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(solve_func, input_grid),
+                    timeout=timeout
+                )
+                
+                if debug:
+                    print(f"Result for input {input_idx}: {result}")
+                    
+                results.append(result)
+            except asyncio.TimeoutError:
+                print(f"Execution timed out after {timeout} seconds on input {input_idx}")
+                results.append(None)
+            except Exception as e:
+                print(f"Error during execution on input {input_idx}: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
+                results.append(None)
+                
+    except Exception as e:
+        print(f"Error setting up execution environment: {e}")
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return [None] * len(inputs)
+    
+    return results
+
+
+async def run_batch_programs_local(programs: List[str], inputs: List[List[List[int]]]) -> Dict[int, List[Optional[List[List[int]]]]]:
+    """
+    Run multiple programs using the local executor.
+    
+    Args:
+        programs: List of Python code strings containing solve functions
+        inputs: A list of input grids to test
+        
+    Returns:
+        Dictionary mapping program indices to their results
+    """
+    print(f"Starting local batch execution of {len(programs)} programs on {len(inputs)} inputs at {time.strftime('%H:%M:%S')}")
+    start_time = time.time()
+    
+    if not programs:
+        return {}
+    
+    # Process each program individually
+    results = {}
+    for i, program in enumerate(programs):
+        print(f"Executing program {i} locally with 1.5s timeout at {time.strftime('%H:%M:%S')}...")
+        execution_start = time.time()
+        
+        try:
+            # Use debug mode for the first program to help diagnose issues
+            debug_mode = (i == 0)
+            program_results = await run_in_local_sandbox(program, inputs, timeout=1.5, debug=debug_mode)
+            execution_time = time.time() - execution_start
+            print(f"Program {i} execution completed in {execution_time:.2f}s")
+            
+            # Store results
+            results[i] = program_results
+            
+        except Exception as e:
+            execution_time = time.time() - execution_start
+            print(f"Error executing program {i}: {e}")
+            results[i] = [None] * len(inputs)
+    
+    total_time = time.time() - start_time
+    print(f"Local batch execution completed in {total_time:.2f}s")
+    return results
+
+</sandbox/local_executor.py>
+
+<main.py>
+"""Main entry point for the Greenblatt-style ARC demo.
+
+This file allows running the demo from the greenblatt directory using:
+uv run main.py --task-id 00576224 --k 8 --visualize
+"""
+import sys
+import os
+from pathlib import Path
+
+# Add the current directory to the Python path
+sys.path.insert(0, os.path.abspath('.'))
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load .env file from the current directory
+    env_path = Path('.') / '.env'
+    load_dotenv(dotenv_path=env_path)
+    print("Loaded environment variables from .env file")
+except ImportError:
+    print("Warning: python-dotenv not installed. Environment variables must be set manually.")
+except Exception as e:
+    print(f"Warning: Failed to load .env file: {e}")
+
+import asyncio
+from cli.main import main_async
+
+def main():
+    """Main entry point."""
+    try:
+        exit_code = asyncio.run(main_async())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+</main.py>
+
+<test-scripts/mcp_test.py>
+#!/usr/bin/env python3
+"""
+MCP Sandbox Test Script
+
+This script tests running code in the MCP sandbox using the running MCP server.
+It connects to the MCP server via stdio and executes a simple grid transformation.
+"""
+import asyncio
+import json
+import sys
+import subprocess
+from pathlib import Path
+
+# Add the parent directory to the path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Import MCP client libraries
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client
+
+# Test grid transformation function
+TEST_CODE = """
+def solve(grid):
+    # This function repeats the input grid in a 2x2 pattern
+    rows = len(grid)
+    cols = len(grid[0])
+    
+    # Create a new grid with twice the dimensions
+    result = []
+    for i in range(rows * 2):
+        row = []
+        for j in range(cols * 2):
+            # Get the corresponding cell from the original grid
+            orig_i = i % rows
+            orig_j = j % cols
+            row.append(grid[orig_i][orig_j])
+        result.append(row)
+    
+    return result
+"""
+
+# Test input grid
+TEST_INPUT = [
+    [1, 2],
+    [3, 4]
+]
+
+# Expected output
+EXPECTED_OUTPUT = [
+    [1, 2, 1, 2],
+    [3, 4, 3, 4],
+    [1, 2, 1, 2],
+    [3, 4, 3, 4]
+]
+
+async def run_in_mcp_sandbox():
+    """Run code in the MCP sandbox using the stdio client."""
+    print("Connecting to the running MCP server...")
+    
+    # Create a client using the stdio transport
+    async with stdio_client() as (read, write):
+        # Create a session with the client
+        async with ClientSession(read, write) as session:
+            # Initialize the session
+            await session.initialize()
+            
+            # List available tools
+            tools = await session.list_tools()
+            print(f"Available MCP tools: {[tool.name for tool in tools.tools]}")
+            
+            # Prepare the full code with imports and wrapper
+            full_code = f"""
+# /// script
+# dependencies = []
+# ///
+
+# Only use standard library modules
+import json
+
+# LLM-generated code
+{TEST_CODE}
+
+# Test function
+def run_tests(inputs):
+    results = []
+    for inp in inputs:
+        try:
+            result = solve(inp)
+            results.append(result)
+        except Exception as e:
+            print(f"Error: {{e}}")
+            results.append(None)
+    return results
+
+# Run tests
+inputs = {json.dumps([TEST_INPUT])}
+results = run_tests(inputs)
+print(json.dumps(results))
+"""
+            
+            # Execute the code in the sandbox
+            result = await session.call_tool('run_python_code', {'python_code': full_code})
+            
+            # Print the raw output for debugging
+            output_text = result.content[0].text
+            print(f"\nRaw output from MCP sandbox:\n{output_text}")
+            
+            # Parse the output to extract the JSON results
+            try:
+                # Look for JSON array in the output
+                for line in output_text.splitlines():
+                    line = line.strip()
+                    if line.startswith('[') and line.endswith(']'):
+                        results = json.loads(line)
+                        
+                        # Check if we got a result
+                        if results is None or len(results) == 0 or results[0] is None:
+                            print("Error: No result returned from MCP sandbox")
+                            return False
+                        
+                        # Get the first result
+                        result = results[0]
+                        
+                        # Print the result
+                        print("\nInput grid:")
+                        for row in TEST_INPUT:
+                            print(row)
+                        
+                        print("\nOutput grid:")
+                        for row in result:
+                            print(row)
+                        
+                        # Verify the result
+                        if result == EXPECTED_OUTPUT:
+                            print("\n✅ Test passed! The MCP sandbox is working correctly.")
+                            return True
+                        else:
+                            print("\n❌ Test failed! The output does not match the expected output.")
+                            print(f"Expected: {EXPECTED_OUTPUT}")
+                            print(f"Got: {result}")
+                            return False
+                
+                print("Error: Could not find JSON output in the response")
+                return False
+                
+            except json.JSONDecodeError as e:
+                print(f"Error parsing JSON output: {e}")
+                return False
+            except Exception as e:
+                print(f"Error processing result: {e}")
+                return False
+
+async def main_async():
+    """Main async function."""
+    print("Testing MCP sandbox...")
+    print("Make sure the MCP server is running in a separate terminal with:")
+    print("deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydantic/mcp-run-python stdio")
+    
+    try:
+        # Run the test
+        success = await run_in_mcp_sandbox()
+        return 0 if success else 1
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+def main():
+    """Main function."""
+    try:
+        # Run the async main function
+        exit_code = asyncio.run(main_async())
+        sys.exit(exit_code)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+
+</test-scripts/mcp_test.py>
+
+<test-scripts/simple_mcp_test.py>
+#!/usr/bin/env python3
+"""
+Simple MCP Sandbox Test
+
+This script tests running code in the MCP sandbox using the stdio transport.
+"""
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+import asyncio
+import json
+
+# Define the server parameters
+server_params = StdioServerParameters(
+    command='deno',
+    args=[
+        'run',
+        '-N',
+        '-R=node_modules',
+        '-W=node_modules',
+        '--node-modules-dir=auto',
+        'jsr:@pydantic/mcp-run-python',
+        'stdio',
+    ],
+)
+
+# Test grid transformation function
+code = """
+# /// script
+# dependencies = []
+# ///
+import json
+
+def solve(grid):
+    # This function repeats the input grid in a 2x2 pattern
+    rows = len(grid)
+    cols = len(grid[0])
+    
+    # Create a new grid with twice the dimensions
+    result = []
+    for i in range(rows * 2):
+        row = []
+        for j in range(cols * 2):
+            # Get the corresponding cell from the original grid
+            orig_i = i % rows
+            orig_j = j % cols
+            row.append(grid[orig_i][orig_j])
+        result.append(row)
+    
+    return result
+
+# Test input and expected output
+test_input = [[1, 2], [3, 4]]
+expected_output = [
+    [1, 2, 1, 2],
+    [3, 4, 3, 4],
+    [1, 2, 1, 2],
+    [3, 4, 3, 4]
+]
+
+# Run the test
+result = solve(test_input)
+
+# Print the results
+print("Input grid:")
+print(json.dumps(test_input))
+print("\\nOutput grid:")
+print(json.dumps(result))
+print("\\nTest passed:", result == expected_output)
+"""
+
+async def main():
+    print("Connecting to MCP server...")
+    async with stdio_client(server_params) as (read, write):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            
+            # List available tools
+            tools = await session.list_tools()
+            print(f"Available MCP tools: {[tool.name for tool in tools.tools]}")
+            
+            # Run the code in the sandbox
+            print("\nRunning code in sandbox...")
+            result = await session.call_tool('run_python_code', {'python_code': code})
+            
+            # Print the result
+            print("\nSandbox output:")
+            print(result.content[0].text)
+            
+            print("\nTest completed successfully!")
+
+# Run the async main function
+if __name__ == "__main__":
+    asyncio.run(main())
+
+</test-scripts/simple_mcp_test.py>
+
+<test-scripts/openai_client_test.py>
+#!/usr/bin/env python3
+"""
+OpenAI Client Test Script
+
+This script tests the OpenRouter API using the OpenAI client with the correct configuration.
+"""
+import os
+import sys
+import json
+from pathlib import Path
+
+# Try to load from dotenv
+try:
+    from dotenv import load_dotenv
+    # Load .env file from the parent directory (greenblatt)
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+    print(f"Loaded .env from: {env_path}")
+except ImportError:
+    print("Warning: python-dotenv not installed")
+except Exception as e:
+    print(f"Warning: Failed to load .env file: {e}")
+
+# Get the API key
+api_key = os.environ.get('OPENROUTER_API_KEY')
+if not api_key:
+    print("ERROR: OPENROUTER_API_KEY is not set")
+    sys.exit(1)
+
+# Print the API key info
+print(f"API key length: {len(api_key)}")
+print(f"API key prefix: {api_key[:10]}...")
+
+# Import OpenAI client
+from openai import OpenAI
+
+# Create client with correct configuration
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=api_key,
+)
+
+print("\nSending request to OpenRouter API...")
+
+try:
+    # Make the request with extra_headers
+    completion = client.chat.completions.create(
+        model="google/gemini-2.0-flash-001",
+        messages=[
+            {"role": "user", "content": "Say hello world"}
+        ],
+        extra_headers={
+            "HTTP-Referer": "https://github.com/TrelisResearch/arc-demo",
+            "X-Title": "ARC-Greenblatt-Demo"
+        }
+    )
+    
+    # Print the response
+    print("\nAPI call successful!")
+    print(f"Response: {completion.choices[0].message.content}")
+    print(f"Model: {completion.model}")
+    print(f"Token usage: {completion.usage}")
+    
+    # Print the full response as JSON
+    response_dict = {
+        "id": completion.id,
+        "model": completion.model,
+        "choices": [
+            {
+                "index": choice.index,
+                "message": {
+                    "role": choice.message.role,
+                    "content": choice.message.content
+                },
+                "finish_reason": choice.finish_reason
+            } for choice in completion.choices
+        ],
+        "usage": {
+            "prompt_tokens": completion.usage.prompt_tokens,
+            "completion_tokens": completion.usage.completion_tokens,
+            "total_tokens": completion.usage.total_tokens
+        }
+    }
+    print(f"\nFull response: {json.dumps(response_dict, indent=2)}")
+    
+except Exception as e:
+    print(f"\nError: {e}")
+    print(f"Error type: {type(e)}")
+    if hasattr(e, 'response'):
+        print(f"Response status: {e.response.status_code}")
+        print(f"Response body: {e.response.text}")
+    if hasattr(e, '__dict__'):
+        print(f"Error attributes: {e.__dict__}")
+
+</test-scripts/openai_client_test.py>
+
+<test-scripts/direct_openrouter_test.py>
+#!/usr/bin/env python3
+"""
+Direct OpenRouter Test Script
+
+This script tests the OpenRouter API using the requests library for maximum transparency.
+"""
+import os
+import sys
+import json
+import requests
+from pathlib import Path
+
+# Try to load from dotenv
+try:
+    from dotenv import load_dotenv
+    # Load .env file from the parent directory (greenblatt)
+    env_path = Path(__file__).parent.parent / '.env'
+    load_dotenv(dotenv_path=env_path)
+    print(f"Loaded .env from: {env_path}")
+except ImportError:
+    print("Warning: python-dotenv not installed")
+except Exception as e:
+    print(f"Warning: Failed to load .env file: {e}")
+
+# Get the API key
+api_key = os.environ.get('OPENROUTER_API_KEY')
+if not api_key:
+    print("ERROR: OPENROUTER_API_KEY is not set")
+    sys.exit(1)
+
+# Print the full API key for debugging
+print(f"Full API key: {api_key}")
+print(f"API key length: {len(api_key)}")
+
+# API configuration
+api_base = "https://openrouter.ai/api/v1"
+model_id = "google/gemini-2.0-flash-001"
+
+# Prepare the request
+headers = {
+    "Authorization": f"Bearer {api_key}",
+    "HTTP-Referer": "https://github.com/TrelisResearch/arc-demo",
+    "X-Title": "ARC-Greenblatt-Demo",
+    "Content-Type": "application/json"
+}
+
+data = {
+    "model": model_id,
+    "messages": [
+        {"role": "user", "content": "Say hello world"}
+    ]
+}
+
+# Print request details
+print("\n=== REQUEST ===")
+print(f"URL: {api_base}/chat/completions")
+print("Headers:")
+for name, value in headers.items():
+    # Mask the Authorization header value
+    if name.lower() == "authorization":
+        value_parts = value.split()
+        if len(value_parts) > 1:
+            value = f"{value_parts[0]} {value_parts[1][:4]}...{value_parts[1][-4:]}"
+    print(f"  {name}: {value}")
+print(f"Body: {json.dumps(data, indent=2)}")
+
+# Make the request
+try:
+    print("\nSending request to OpenRouter API...")
+    response = requests.post(
+        f"{api_base}/chat/completions",
+        headers=headers,
+        json=data
+    )
+    
+    # Print response details
+    print("\n=== RESPONSE ===")
+    print(f"Status: {response.status_code} {response.reason}")
+    print("Headers:")
+    for name, value in response.headers.items():
+        print(f"  {name}: {value}")
+    
+    # Try to parse the response as JSON
+    try:
+        response_data = response.json()
+        print(f"Body: {json.dumps(response_data, indent=2)}")
+    except:
+        print(f"Body: {response.text}")
+    
+    # Check if the request was successful
+    if response.status_code == 200:
+        print("\nAPI call successful!")
+        if "choices" in response_data and response_data["choices"]:
+            print(f"Response: {response_data['choices'][0]['message']['content']}")
+        if "usage" in response_data:
+            print(f"Token usage: {response_data['usage']}")
+    else:
+        print(f"\nAPI call failed with status code {response.status_code}")
+        
+except Exception as e:
+    print(f"\nError: {e}")
+    print(f"Error type: {type(e)}")
+
+</test-scripts/direct_openrouter_test.py>
+
+<test-scripts/test_simplified_runner.py>
+#!/usr/bin/env python3
+"""
+Test Simplified Sandbox Runner
+
+This script tests the simplified sandbox runner with a basic grid transformation.
+"""
+import asyncio
+import json
+import sys
+import os
+
+# Add the parent directory to the path so we can import the sandbox runner
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from sandbox.runner import run_in_sandbox
+
+# Test grid transformation function
+TEST_CODE = """
+def solve(grid):
+    # This function repeats the input grid in a 2x2 pattern
+    rows = len(grid)
+    cols = len(grid[0])
+    
+    # Create a new grid with twice the dimensions
+    result = []
+    for i in range(rows * 2):
+        row = []
+        for j in range(cols * 2):
+            # Get the corresponding cell from the original grid
+            orig_i = i % rows
+            orig_j = j % cols
+            row.append(grid[orig_i][orig_j])
+        result.append(row)
+    
+    return result
+"""
+
+# Test input grid
+TEST_INPUT = [[1, 2], [3, 4]]
+
+# Expected output grid
+EXPECTED_OUTPUT = [
+    [1, 2, 1, 2],
+    [3, 4, 3, 4],
+    [1, 2, 1, 2],
+    [3, 4, 3, 4]
+]
+
+async def main():
+    print("Testing simplified sandbox runner...")
+    print("Make sure the MCP server is running in a separate terminal with:")
+    print("deno run -N -R=node_modules -W=node_modules --node-modules-dir=auto jsr:@pydantic/mcp-run-python stdio")
+    
+    # Run the test code in the sandbox
+    print("\nRunning code in sandbox...")
+    results = await run_in_sandbox(TEST_CODE, [TEST_INPUT], timeout=5.0)
+    
+    # Check the results
+    if results and results[0]:
+        print("\nInput grid:")
+        print(json.dumps(TEST_INPUT))
+        
+        print("\nOutput grid:")
+        print(json.dumps(results[0]))
+        
+        print("\nTest passed:", results[0] == EXPECTED_OUTPUT)
+    else:
+        print("\nTest failed: No valid results returned")
+
+if __name__ == "__main__":
+    asyncio.run(main())
+
+</test-scripts/test_simplified_runner.py>
+

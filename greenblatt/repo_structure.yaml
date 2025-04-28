@@ -1,0 +1,128 @@
+  - path: /core
+    type: directory
+    contents:
+    - path: /core/prompt_template.txt
+      type: file
+    - path: /core/__init__.py
+      type: file
+    - path: /core/evaluate.py
+      type: file
+    - path: /core/generate_programs.py
+      type: file
+  - path: /uv.lock
+    type: file
+  - path: /sample.env
+    type: file
+  - path: /pyproject.toml
+    type: file
+  - path: /project.md
+    type: file
+  - path: /run_k_analysis.py
+    type: file
+  - path: /__init__.py
+    type: file
+  - path: /agent
+    type: directory
+    contents:
+    - path: /agent/__init__.py
+      type: file
+  - path: /cli
+    type: directory
+    contents:
+    - path: /cli/__init__.py
+      type: file
+    - path: /cli/main.py
+      type: file
+  - path: /README.md
+    type: file
+  - path: /visualizations
+    type: directory
+    contents:
+    - path: /visualizations/test
+      type: directory
+      contents:
+    - path: /visualizations/mit_easy
+      type: directory
+      contents:
+      - path: /visualizations/mit_easy/4b6b68e5.png
+        type: file
+      - path: /visualizations/mit_easy/f3cdc58f.png
+        type: file
+      - path: /visualizations/mit_easy/692cd3b6.png
+        type: file
+      - path: /visualizations/mit_easy/c7d4e6ad.png
+        type: file
+      - path: /visualizations/mit_easy/1da012fc.png
+        type: file
+      - path: /visualizations/mit_easy/1a2e2828.png
+        type: file
+      - path: /visualizations/mit_easy/770cc55f.png
+        type: file
+      - path: /visualizations/mit_easy/66e6c45b.png
+        type: file
+      - path: /visualizations/mit_easy/0a1d4ef5.png
+        type: file
+      - path: /visualizations/mit_easy/358ba94e.png
+        type: file
+      - path: /visualizations/mit_easy/963f59bc.png
+        type: file
+      - path: /visualizations/mit_easy/55059096.png
+        type: file
+      - path: /visualizations/mit_easy/7ee1c6ea.png
+        type: file
+      - path: /visualizations/mit_easy/d37a1ef5.png
+        type: file
+      - path: /visualizations/mit_easy/e9c9d9a1.png
+        type: file
+      - path: /visualizations/mit_easy/ef26cbf6.png
+        type: file
+      - path: /visualizations/mit_easy/00576224.png
+        type: file
+      - path: /visualizations/mit_easy/a04b2602.png
+        type: file
+      - path: /visualizations/mit_easy/3194b014.png
+        type: file
+      - path: /visualizations/mit_easy/e9ac8c9e.png
+        type: file
+    - path: /visualizations/arc_eval
+      type: directory
+      contents:
+    - path: /visualizations/mit_easy_debug
+      type: directory
+      contents:
+    - path: /visualizations/debug
+      type: directory
+      contents:
+  - path: /viz
+    type: directory
+    contents:
+    - path: /viz/show_grids.py
+      type: file
+    - path: /viz/__init__.py
+      type: file
+  - path: /check_solutions.py
+    type: file
+  - path: /sandbox
+    type: directory
+    contents:
+    - path: /sandbox/runner.py
+      type: file
+    - path: /sandbox/__init__.py
+      type: file
+    - path: /sandbox/local_executor.py
+      type: file
+  - path: /main.py
+    type: file
+  - path: /test-scripts
+    type: directory
+    contents:
+    - path: /test-scripts/mcp_test.py
+      type: file
+    - path: /test-scripts/simple_mcp_test.py
+      type: file
+    - path: /test-scripts/openai_client_test.py
+      type: file
+    - path: /test-scripts/direct_openrouter_test.py
+      type: file
+    - path: /test-scripts/test_simplified_runner.py
+      type: file
