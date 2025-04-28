@@ -1,0 +1,3 @@
+1. find out why the first mit-easy evaluation example doesn't look like one I'm familiar with from running the greenblatt and the ttt folder..
+2. better understand dsl.
+3. ...
