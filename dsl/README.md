@@ -14,7 +14,7 @@ uv sync # if cloning the repo
 uv run cli/run_task.py 0a1d4ef5 --depth 4 --show
 
 # Run on a dataset
-uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --parallel 32 --save-dir results
+uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 6 --parallel 32 --save-dir results
 ```
 
 ## How It Works

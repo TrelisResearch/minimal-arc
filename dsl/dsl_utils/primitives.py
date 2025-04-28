@@ -69,34 +69,55 @@ def color_mask_fn(grid: Grid, color: int) -> Grid:
 
 def flood_fill_fn(grid: Grid, row: int, col: int, new_color: int) -> Grid:
     """
-    Perform flood fill starting from (row, col) with new_color.
+    Perform a flood fill operation starting from the specified position.
+    
+    Args:
+        grid: The input grid
+        row: The starting row
+        col: The starting column
+        new_color: The color to fill with
+        
+    Returns:
+        A new grid with the flood fill applied
     """
+    # Create a copy of the grid
     result = grid.copy()
-    data = result.data
-    height, width = data.shape
+    height, width = result.data.shape
     
+    # Get the original color
     if not (0 <= row < height and 0 <= col < width):
-        return result  # Out of bounds
+        return result  # Out of bounds, return unchanged
     
-    target_color = data[row, col]
-    if target_color == new_color:
-        return result  # Already the target color
+    original_color = result.data[row, col]
     
-    # Use a simple recursive approach for the test case
-    def fill(r, c):
-        if not (0 <= r < height and 0 <= c < width) or data[r, c] != target_color:
-            return
+    # If the original color is already the new color, no need to fill
+    if original_color == new_color:
+        return result
+    
+    # Use an iterative approach with a queue instead of recursion
+    queue = [(row, col)]
+    visited = set()
+    
+    while queue:
+        r, c = queue.pop(0)
         
-        data[r, c] = new_color
+        # Skip if already visited or out of bounds
+        if (r, c) in visited or not (0 <= r < height and 0 <= c < width):
+            continue
         
-        # Recursively fill the 4-connected neighbors
-        fill(r + 1, c)
-        fill(r - 1, c)
-        fill(r, c + 1)
-        fill(r, c - 1)
-    
-    # Start the fill
-    fill(row, col)
+        # Skip if not the original color
+        if result.data[r, c] != original_color:
+            continue
+        
+        # Fill this pixel
+        result.data[r, c] = new_color
+        visited.add((r, c))
+        
+        # Add neighbors to the queue
+        queue.append((r-1, c))  # Up
+        queue.append((r+1, c))  # Down
+        queue.append((r, c-1))  # Left
+        queue.append((r, c+1))  # Right
     
     return result
 
