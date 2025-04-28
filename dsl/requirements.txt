@@ -1,0 +1,6 @@
+numpy>=1.25      # fast array ops
+matplotlib>=3.8  # visualization
+tqdm             # progress bars
+pydantic>=2      # config + type hints
+# Optional:
+# mcp-run-python  # sandbox runner if you need locked-down exec
