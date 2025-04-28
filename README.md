@@ -3,10 +3,12 @@
 A repository for working with the Abstraction and Reasoning Corpus (ARC) dataset.
 
 Todo:
-[ ] Greenblatt
-    [ ] [Sandboxing](https://chatgpt.com/c/6807b43f-8798-8003-87dc-79c42119a063)
-    [ ] [Writing a long script](https://chatgpt.com/c/6801632f-5864-8003-b9a5-3144b0bf695a)
-
+[x] Greenblatt
+    [x] [Sandboxing](https://chatgpt.com/c/6807b43f-8798-8003-87dc-79c42119a063)
+    [x] [Writing a long script](https://chatgpt.com/c/6801632f-5864-8003-b9a5-3144b0bf695a)
+[ ] Test time training (TTT)
+    [ ] Review current script
+    [ ] Add pre-training on the "train" split
 
 ## Scripts
 
@@ -35,3 +37,4 @@ uv run python clean_arc_data.py
 - `arc-data`: Original ARC data files
 - `arc-data-cleaned`: Cleaned ARC data files
 - `greenblatt`: The Ryan Greenblatt approach of generating many python programs and then testing them.
+- `ttt`: Test-time training.

@@ -1,6 +1,6 @@
 # Greenblatt-style ARC Demo
 
-This project implements a Ryan-Greenblatt-style approach to solving Abstraction and Reasoning Corpus (ARC) tasks. It uses LLMs to generate many program candidates, filters them based on training examples, and uses majority voting to determine the final output.
+This folder implements a Ryan-Greenblatt-style approach to solving Abstraction and Reasoning Corpus (ARC) tasks. It uses LLMs to generate many program candidates, filters them based on training examples, and uses majority voting to determine the final output.
 
 ## Overview
 
