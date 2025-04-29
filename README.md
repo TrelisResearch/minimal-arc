@@ -40,5 +40,5 @@ uv run python clean_arc_data.py
 - `arc-data`: Original ARC data files
 - `arc-data-cleaned`: Cleaned ARC data files
 - `llmgs`: LLM guided search (get an LLM to keep writing programs until one passes on train examples)
-- `ttt`: Test-time training.
-- `dsl`: Domain Specific Language approach.
+- `ttt`: Test-time training (train a neural net to predict outputs, then add depth first search).
+- `dsl`: Domain Specific Language approach (create basic programs and try to combine them to solve the training examples. Deterministic approach.).
