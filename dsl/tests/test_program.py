@@ -17,8 +17,10 @@ sys.path.insert(0, str(project_root))
 from dsl.dsl_utils.program import Program
 from dsl.dsl_utils.primitives import (
     ROT90, ROT180, FLIP_H, FLIP_V, TRANSPOSE,
-    COLORMASK, FILL, OBJECTS, BBOX, TILE, TILE_PATTERN,
-    CROP, REPLACE_COLOR, COUNT_COLOR
+    MASK_C_1, MASK_C_2, MASK_C_3, MASK_C_4, MASK_C_5,
+    FILL_CENTER_1, FILL_TL_1, OBJECTS, BBOX, 
+    TILE_3x3, TILE_PATTERN, CROP_CENTER_HALF,
+    REPLACE_1_TO_2, REPLACE_2_TO_3, COUNT_C_1
 )
 from dsl.dsl_utils.types import Grid, ObjList, Object, Grid_T, ObjList_T, Int_T
 
@@ -82,11 +84,11 @@ class TestProgramExecution(unittest.TestCase):
         self.assertTrue(np.array_equal(result.data, expected.data))
     
     def test_tile_operation(self):
-        """Test the tile operation which requires additional arguments."""
-        program = Program([TILE])
+        """Test the tile operation."""
+        program = Program([TILE_3x3])
         result = program.run(self.grid_2x2)
         
-        # The default tiling should be 3x3
+        # The tiling should be 3x3
         expected = Grid(np.array([
             [1, 2, 1, 2, 1, 2],
             [3, 4, 3, 4, 3, 4],
@@ -129,7 +131,7 @@ class TestProgramExecution(unittest.TestCase):
     def test_error_handling(self):
         """Test error handling during program execution."""
         # Create a program that will fail due to type mismatch
-        program = Program([COUNT_COLOR, ROT90])
+        program = Program([COUNT_C_1, ROT90])
         result = program.run(self.grid_2x2)
         
         # The program should return None due to the error
@@ -167,31 +169,21 @@ class TestComplexPrograms(unittest.TestCase):
     
     def test_color_operations(self):
         """Test a sequence of color operations."""
-        # Create a custom program that applies replace_color operations
-        program = Program([
-            REPLACE_COLOR,  # Will be called with default arguments in Program.run
-            REPLACE_COLOR   # Will be called with default arguments in Program.run
-        ])
-        
-        # Override the run method to use specific arguments
-        original_run = program.run
-        def custom_run(grid):
-            # First replace color 1 with 3
-            intermediate = REPLACE_COLOR.fn(grid, 1, 3)
-            # Then replace color 2 with 4
-            return REPLACE_COLOR.fn(intermediate, 2, 4)
-        
-        # Use our custom run method
-        program.run = custom_run
-        
+        # Create a program that applies replace_color operations
+        # REPLACE_1_TO_2 replaces color 1 with 2
+        # REPLACE_2_TO_3 replaces color 2 with 3
+        program = Program([REPLACE_1_TO_2, REPLACE_2_TO_3])
         result = program.run(self.grid)
         
+        # Expected result after applying both operations:
+        # Color 1 becomes 2, then 2 becomes 3
+        # Color 2 becomes 3
         expected = Grid(np.array([
             [0, 0, 0, 0, 0],
-            [0, 3, 3, 0, 0],
-            [0, 3, 3, 0, 0],
-            [0, 0, 0, 4, 4],
-            [0, 0, 0, 4, 4]
+            [0, 3, 3, 0, 0],  # 1 -> 2 -> 3
+            [0, 3, 3, 0, 0],  # 1 -> 2 -> 3
+            [0, 0, 0, 3, 3],  # 2 -> 3
+            [0, 0, 0, 3, 3]   # 2 -> 3
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
 

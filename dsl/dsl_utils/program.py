@@ -75,70 +75,8 @@ class Program:
                 
                 # Apply a timeout to each operation
                 with operation_timeout(op_timeout):
-                    # Apply the operation with appropriate arguments
-                    if op.name == "tile" and len(op.fn.__code__.co_varnames) > 1:
-                        # Special case for tile which needs additional arguments
-                        # Assume we want to tile 3x3 for now (common case)
-                        rows, cols = 3, 3
-                        # If the output is expected to be 6x6, use 3x3 tiling
-                        if result.shape == (2, 2):
-                            rows, cols = 3, 3
-                        result = op.fn(result, rows, cols)
-                    elif op.name == "mask_color":
-                        # Find a color to mask (for simplicity, use the most common non-zero color)
-                        unique_colors, counts = np.unique(result.data, return_counts=True)
-                        non_zero_colors = [c for c in unique_colors if c != 0]
-                        if not non_zero_colors:
-                            color = 1  # Default if no non-zero colors
-                        else:
-                            # Use the most common non-zero color
-                            non_zero_indices = [i for i, c in enumerate(unique_colors) if c != 0]
-                            color = unique_colors[non_zero_indices[np.argmax(counts[non_zero_indices])]]
-                        result = op.fn(result, int(color))
-                    elif op.name == "flood_fill":
-                        # Find a point to fill (for simplicity, use the first non-zero point)
-                        non_zero_points = np.argwhere(result.data > 0)
-                        if len(non_zero_points) == 0:
-                            # If no non-zero points, use the center
-                            row, col = result.data.shape[0] // 2, result.data.shape[1] // 2
-                            new_color = 1  # Default color
-                        else:
-                            row, col = non_zero_points[0]
-                            new_color = (result.data[row, col] + 1) % 10  # Next color
-                        result = op.fn(result, int(row), int(col), int(new_color))
-                    elif op.name == "crop":
-                        # Default crop: center portion
-                        h, w = result.data.shape
-                        crop_h, crop_w = max(1, h // 2), max(1, w // 2)
-                        top, left = (h - crop_h) // 2, (w - crop_w) // 2
-                        result = op.fn(result, int(top), int(left), int(crop_h), int(crop_w))
-                    elif op.name == "replace_color":
-                        # Replace the first non-zero color with a different color
-                        unique_colors = np.unique(result.data)
-                        non_zero_colors = [c for c in unique_colors if c != 0]
-                        if non_zero_colors:
-                            old_color = non_zero_colors[0]
-                            new_color = (old_color + 1) % 10
-                            if new_color == 0:  # Avoid using 0 as it's typically background
-                                new_color = 1
-                            result = op.fn(result, int(old_color), int(new_color))
-                        else:
-                            # If no non-zero colors, replace 0 with 1
-                            result = op.fn(result, 0, 1)
-                    elif op.name == "count_color":
-                        # Count the most common non-zero color
-                        unique_colors, counts = np.unique(result.data, return_counts=True)
-                        non_zero_colors = [c for c in unique_colors if c != 0]
-                        if not non_zero_colors:
-                            color = 1  # Default if no non-zero colors
-                        else:
-                            # Use the most common non-zero color
-                            non_zero_indices = [i for i, c in enumerate(unique_colors) if c != 0]
-                            color = unique_colors[non_zero_indices[np.argmax(counts[non_zero_indices])]]
-                        result = op.fn(result, int(color))
-                    else:
-                        # Standard operation with no additional arguments
-                        result = op.fn(result)
+                    # Apply the operation - all operations are now unary (take only one argument)
+                    result = op.fn(result)
         except TimeoutException:
             raise TimeoutException(f"Program execution timed out at operation: {op.name}")
         except Exception as e:
