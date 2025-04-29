@@ -26,6 +26,7 @@ This script filters ARC data files to keep only examples with single test inputs
 
 **Usage:**
 ```bash
+uv venv
 cd arc-data
 uv run python clean_arc_data.py
 ```
@@ -39,6 +40,6 @@ uv run python clean_arc_data.py
 
 - `arc-data`: Original ARC data files
 - `arc-data-cleaned`: Cleaned ARC data files
-- `llmgs`: LLM guided search (get an LLM to keep writing programs until one passes on train examples)
-- `ttt`: Test-time training (train a neural net to predict outputs, then add depth first search).
 - `dsl`: Domain Specific Language approach (create basic programs and try to combine them to solve the training examples. Deterministic approach.).
+- `llmgs`: LLM guided search (get an LLM to keep writing programs until one passes on train examples).
+- `ttt`: Test-time training (train a neural net to predict outputs, then add depth first search).

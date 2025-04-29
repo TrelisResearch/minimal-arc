@@ -18,7 +18,7 @@ uv add numpy matplotlib tqdm pydantic
 uv sync # if cloning the repo
 
 # Run on a single task
-uv run cli/run_task.py 1a2e2828 --depth 4 --show --data-path ../arc-data-cleaned --timeout 60 --debug
+uv run cli/run_task.py 66e6c45b --depth 4 --show --data-path ../arc-data-cleaned --timeout 60 --debug
 
 # Run on a dataset
 uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 60 --save-dir results --data-path ../arc-data-cleaned
