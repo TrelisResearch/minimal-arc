@@ -101,7 +101,9 @@ def shift_up_pad(g):
 
 def shift_down_pad(g):
     """Shift the grid down by one cell (with zero-padding)."""
-    return shift_up_pad(Grid(np.flipud(g.data)))
+    z = np.zeros_like(g.data)
+    z[1:, :] = g.data[:-1, :]
+    return Grid(z)
 
 
 def color_mask_fn(grid: Grid, color: int) -> Grid:
@@ -488,8 +490,8 @@ def replace_1_to_2_fn(g):
 ROT90 = Op("rot90", rot90_fn, Grid_T, Grid_T)
 ROT180 = Op("rot180", rot180_fn, Grid_T, Grid_T, commutes_with={"rot180"})
 ROT270 = Op("rot270", rot270_fn, Grid_T, Grid_T)
-FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
-FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
+FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T)
+FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T)
 TRANSPOSE = Op("transpose", transpose_fn, Grid_T, Grid_T)
 FLIP_DIAG = Op("flip_diag", flip_diag_fn, Grid_T, Grid_T)
 FLIP_ANTIDIAG = Op("flip_antidiag", flip_antidiag_fn, Grid_T, Grid_T)

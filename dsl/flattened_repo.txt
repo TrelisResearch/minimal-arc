@@ -360,38 +360,38 @@ pydantic>=2      # config + type hints
 <results.json>
 [
   {
-    "task_id": "66e6c45b",
-    "solved": true,
-    "correct": true,
-    "program": "Program(tile_2x2, rot180, crop_center_half)",
-    "elapsed_time": 0.10629701614379883,
+    "task_id": "0a1d4ef5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 3.981590270996094e-05,
     "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "c7d4e6ad",
+    "task_id": "692cd3b6",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 6.011060953140259,
-    "search_exhausted": true,
+    "elapsed_time": 4.220008850097656e-05,
+    "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "f3cdc58f",
+    "task_id": "3194b014",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 7.342403888702393,
-    "search_exhausted": true,
+    "elapsed_time": 3.886222839355469e-05,
+    "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "00576224",
+    "task_id": "66e6c45b",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 0.0007202625274658203,
+    "elapsed_time": 0.0001418590545654297,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -400,89 +400,8 @@ pydantic>=2      # config + type hints
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 8.334810018539429,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "55059096",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 9.124157905578613,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "692cd3b6",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 10.776066064834595,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "d37a1ef5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 13.40383791923523,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "ef26cbf6",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 11.806384086608887,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "7ee1c6ea",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 10.506181955337524,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "e9ac8c9e",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 8.380339860916138,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "770cc55f",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 4.484262943267822,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "a04b2602",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 18.394893169403076,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "e9c9d9a1",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 21.645970821380615,
-    "search_exhausted": true,
+    "elapsed_time": 0.00015592575073242188,
+    "search_exhausted": false,
     "search_timed_out": false
   },
   {
@@ -490,25 +409,16 @@ pydantic>=2      # config + type hints
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 34.75895714759827,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "1a2e2828",
-    "solved": true,
-    "correct": true,
-    "program": "Program(crop_center_third, crop_center_third, shift_up_pad, replace_0_to_1)",
-    "elapsed_time": 14.494375228881836,
+    "elapsed_time": 4.601478576660156e-05,
     "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "3194b014",
-    "solved": true,
-    "correct": true,
-    "program": "Program(crop_center_half, crop_center_third, mask_c1, replace_0_to_1)",
-    "elapsed_time": 52.00044107437134,
+    "task_id": "d37a1ef5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 0.00010323524475097656,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -517,8 +427,35 @@ pydantic>=2      # config + type hints
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 55.92790913581848,
-    "search_exhausted": true,
+    "elapsed_time": 5.030632019042969e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "c7d4e6ad",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.100799560546875e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "f3cdc58f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.506111145019531e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "55059096",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 0.00012183189392089844,
+    "search_exhausted": false,
     "search_timed_out": false
   },
   {
@@ -526,17 +463,80 @@ pydantic>=2      # config + type hints
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 60.896626234054565,
-    "search_exhausted": true,
+    "elapsed_time": 4.291534423828125e-05,
+    "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "0a1d4ef5",
+    "task_id": "00576224",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 112.66530084609985,
-    "search_exhausted": true,
+    "elapsed_time": 6.985664367675781e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "e9c9d9a1",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 8.0108642578125e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "a04b2602",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 5.4836273193359375e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "ef26cbf6",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 8.916854858398438e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "7ee1c6ea",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.887580871582031e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "1a2e2828",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.696846008300781e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "770cc55f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.291534423828125e-05,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "e9ac8c9e",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 3.409385681152344e-05,
+    "search_exhausted": false,
     "search_timed_out": false
   }
 ]
@@ -1708,7 +1708,7 @@ ARC DSL Search Heuristics.
 
 This module implements heuristics for pruning the search space.
 """
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Union
 import numpy as np
 import time
 import signal
@@ -1797,7 +1797,7 @@ def symmetry_prune(ops: List[Op]) -> bool:
     
     # Check for consecutive involutions
     for i in range(len(ops) - 1):
-        if ops[i].name == ops[i+1].name and ops[i].name in ops[i].commutes_with:
+        if ops[i].name == ops[i+1].name and hasattr(ops[i], 'commutes_with') and ops[i].name in ops[i].commutes_with:
             return True
     
     # Check for rotation patterns
@@ -1825,17 +1825,56 @@ def symmetry_prune(ops: List[Op]) -> bool:
     return False
 
 
-def shape_heuristic(input_shape: Tuple[int, int], output_shape: Tuple[int, int]) -> Set[str]:
+def shape_heuristic(input_shape: Tuple[int, int], output_shape: Tuple[int, int], prefix: List[Op] = None, next_op: Op = None) -> Union[Set[str], bool]:
     """
     Use shape information to determine which operations are likely to be useful.
     
     Args:
         input_shape: The shape of the input grid
         output_shape: The shape of the expected output grid
+        prefix: Optional list of operations already applied (for enumerator usage)
+        next_op: Optional next operation to consider (for enumerator usage)
         
     Returns:
-        A set of operation names that are likely to be useful
+        If prefix and next_op are provided: True if the operation is likely useful, False otherwise
+        Otherwise: A set of operation names that are likely to be useful
     """
+    # If called from enumerator with prefix and next_op
+    if prefix is not None and next_op is not None:
+        # Depth of the current search (length of prefix)
+        depth = len(prefix)
+        
+        # If the output is the same shape as the input and we're at depth 1,
+        # only allow rotation, flip, transpose, and color operations
+        if depth == 1 and output_shape == input_shape:
+            allowed_ops = {
+                "rot90", "rot180", "rot270", 
+                "flip_h", "flip_v", "transpose", 
+                "flip_diag", "flip_antidiag",
+                "mask_c1", "mask_c2", "mask_c3",
+                "replace_0_to_1", "replace_1_to_2",
+                "hole_mask"
+            }
+            if next_op.name not in allowed_ops:
+                return False
+        
+        # If the output is smaller than the input, prioritize operations that reduce size
+        if output_shape[0] < input_shape[0] or output_shape[1] < input_shape[1]:
+            if next_op.name in ["crop_center_half", "crop_center_third"]:
+                return True
+            if len(prefix) > 0 and prefix[-1].name.startswith("crop_"):
+                return True
+        
+        # If the output is larger than the input, prioritize operations that increase size
+        if output_shape[0] > input_shape[0] or output_shape[1] > input_shape[1]:
+            if next_op.name in ["tile_2x2", "tile_3x3", "tile_pattern", 
+                               "shift_up_pad", "shift_down_pad", "shift_left", "shift_right"]:
+                return True
+        
+        # Default: allow the operation
+        return True
+    
+    # Original behavior when called without prefix and next_op
     useful_ops = set()
     
     # If shapes match, transformations are likely useful
@@ -1907,6 +1946,7 @@ from ..dsl_utils.primitives import Op, ALL_PRIMITIVES, TILE_PATTERN
 from ..dsl_utils.program import Program
 from ..dsl_utils.types import Type, Grid, ObjList, Grid_T
 from .grid_signature import compute_grid_signature, is_signature_compatible
+from .heuristics import shape_heuristic as shape_heuristic_base
 
 class TimeoutException(Exception):
     """Exception raised when a timeout occurs."""
@@ -1970,7 +2010,7 @@ def breaks_symmetry(prefix: List[Op], next_op: Op) -> bool:
         return False
     
     # Check if the next operation commutes with the last one
-    if next_op.name in prefix[-1].commutes_with:
+    if hasattr(prefix[-1], 'commutes_with') and next_op.name in prefix[-1].commutes_with:
         # If they commute, ensure they're in a canonical order
         return next_op.name < prefix[-1].name
     
@@ -2002,38 +2042,7 @@ def shape_heuristic(prefix: List[Op], next_op: Op,
     Returns:
         True if the operation is likely to be useful, False otherwise
     """
-    # Depth of the current search (length of prefix)
-    depth = len(prefix)
-    
-    # If the output is the same shape as the input and we're at depth 1,
-    # only allow rotation, flip, transpose, and color operations
-    if depth == 1 and output_shape == input_shape:
-        allowed_ops = {
-            "rot90", "rot180", "rot270", 
-            "flip_h", "flip_v", "transpose", 
-            "flip_diag", "flip_antidiag",
-            "mask_c1", "mask_c2", "mask_c3",
-            "replace_0_to_1", "replace_1_to_2",
-            "hole_mask"
-        }
-        if next_op.name not in allowed_ops:
-            return False
-    
-    # If the output is smaller than the input, prioritize operations that reduce size
-    if output_shape[0] < input_shape[0] or output_shape[1] < input_shape[1]:
-        if next_op.name in ["crop_center_half", "crop_center_third"]:
-            return True
-        if len(prefix) > 0 and prefix[-1].name.startswith("crop_"):
-            return True
-    
-    # If the output is larger than the input, prioritize operations that increase size
-    if output_shape[0] > input_shape[0] or output_shape[1] > input_shape[1]:
-        if next_op.name in ["tile_2x2", "tile_3x3", "tile_pattern", 
-                           "shift_up_pad", "shift_down_pad", "shift_left", "shift_right"]:
-            return True
-    
-    # Default: allow the operation
-    return True
+    return shape_heuristic_base(prefix, next_op, input_shape, output_shape)
 
 
 def hash_grid(grid: Grid) -> bytes:
@@ -2082,7 +2091,7 @@ def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: 
     return hashes
 
 
-def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op, op_timeout: float = 0.25) -> Optional[List[Grid]]:
+def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op, remaining: int, op_timeout: float = 0.25) -> Optional[List[Grid]]:
     """
     Extend a list of prefix states with an operation, checking compatibility with target states.
     
@@ -2090,6 +2099,7 @@ def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op,
         prefix_states: List of current grid states (one per training example)
         target_states: List of target grid states (one per training example)
         op: The operation to apply
+        remaining: Remaining depth
         op_timeout: Timeout for the operation in seconds
         
     Returns:
@@ -2121,6 +2131,12 @@ def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op,
                     # Signatures are incompatible, prune this branch
                     return None
                 
+                # ----------   H / W  disagreement prune  ----------
+                delta           = np.sum(new_grid.data != target.data)
+                # very loose upper-bound: one op may touch *all* cells
+                if delta > remaining * new_grid.data.size:
+                    return None
+
                 new_states.append(new_grid)
         except (TimeoutException, Exception):
             # Operation timed out or failed, prune this branch
@@ -2216,7 +2232,7 @@ def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
         # If we have training inputs and outputs, use joint-example forward search
         if train_inputs and train_outputs and prefix_states:
             # Extend the prefix states with the new operation
-            new_states = extend_with_op(prefix_states, train_outputs, op, op_timeout)
+            new_states = extend_with_op(prefix_states, train_outputs, op, remaining, op_timeout)
             
             # If any example was pruned, skip this operation
             if new_states is None:
@@ -2485,7 +2501,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
         primitives: List of primitives to use
         max_depth: Maximum program depth
         input_shape: Shape of the input grid
-        output_shape: Shape of the output grid
+        output_shape: Shape of the expected output grid
         timeout: Search timeout in seconds
         parallel: Whether to use parallel search
         num_processes: Number of processes to use for parallel search (optional)
@@ -3300,7 +3316,9 @@ def shift_up_pad(g):
 
 def shift_down_pad(g):
     """Shift the grid down by one cell (with zero-padding)."""
-    return shift_up_pad(Grid(np.flipud(g.data)))
+    z = np.zeros_like(g.data)
+    z[1:, :] = g.data[:-1, :]
+    return Grid(z)
 
 
 def color_mask_fn(grid: Grid, color: int) -> Grid:
@@ -3687,8 +3705,8 @@ def replace_1_to_2_fn(g):
 ROT90 = Op("rot90", rot90_fn, Grid_T, Grid_T)
 ROT180 = Op("rot180", rot180_fn, Grid_T, Grid_T, commutes_with={"rot180"})
 ROT270 = Op("rot270", rot270_fn, Grid_T, Grid_T)
-FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
-FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
+FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T)
+FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T)
 TRANSPOSE = Op("transpose", transpose_fn, Grid_T, Grid_T)
 FLIP_DIAG = Op("flip_diag", flip_diag_fn, Grid_T, Grid_T)
 FLIP_ANTIDIAG = Op("flip_antidiag", flip_antidiag_fn, Grid_T, Grid_T)

@@ -3,7 +3,7 @@ ARC DSL Search Heuristics.
 
 This module implements heuristics for pruning the search space.
 """
-from typing import List, Tuple, Optional, Set
+from typing import List, Tuple, Optional, Set, Union
 import numpy as np
 import time
 import signal
@@ -92,7 +92,7 @@ def symmetry_prune(ops: List[Op]) -> bool:
     
     # Check for consecutive involutions
     for i in range(len(ops) - 1):
-        if ops[i].name == ops[i+1].name and ops[i].name in ops[i].commutes_with:
+        if ops[i].name == ops[i+1].name and hasattr(ops[i], 'commutes_with') and ops[i].name in ops[i].commutes_with:
             return True
     
     # Check for rotation patterns
@@ -120,17 +120,55 @@ def symmetry_prune(ops: List[Op]) -> bool:
     return False
 
 
-def shape_heuristic(input_shape: Tuple[int, int], output_shape: Tuple[int, int]) -> Set[str]:
+def shape_heuristic(prefix: List[Op], next_op: Op, input_shape: Tuple[int, int], output_shape: Tuple[int, int]) -> Union[Set[str], bool]:
     """
     Use shape information to determine which operations are likely to be useful.
     
     Args:
+        prefix: List of operations already applied
+        next_op: The next operation to consider
         input_shape: The shape of the input grid
         output_shape: The shape of the expected output grid
         
     Returns:
-        A set of operation names that are likely to be useful
+        True if the operation is likely useful, False otherwise
     """
+    # If called from enumerator with prefix and next_op
+    if prefix is not None and next_op is not None:
+        # Depth of the current search (length of prefix)
+        depth = len(prefix)
+        
+        # If the output is the same shape as the input and we're at depth 1,
+        # only allow rotation, flip, transpose, and color operations
+        if depth == 1 and output_shape == input_shape:
+            allowed_ops = {
+                "rot90", "rot180", "rot270", 
+                "flip_h", "flip_v", "transpose", 
+                "flip_diag", "flip_antidiag",
+                "mask_c1", "mask_c2", "mask_c3",
+                "replace_0_to_1", "replace_1_to_2",
+                "hole_mask"
+            }
+            if next_op.name not in allowed_ops:
+                return False
+        
+        # If the output is smaller than the input, prioritize operations that reduce size
+        if output_shape[0] < input_shape[0] or output_shape[1] < input_shape[1]:
+            if next_op.name in ["crop_center_half", "crop_center_third"]:
+                return True
+            if len(prefix) > 0 and prefix[-1].name.startswith("crop_"):
+                return True
+        
+        # If the output is larger than the input, prioritize operations that increase size
+        if output_shape[0] > input_shape[0] or output_shape[1] > input_shape[1]:
+            if next_op.name in ["tile_2x2", "tile_3x3", "tile_pattern", 
+                               "shift_up_pad", "shift_down_pad", "shift_left", "shift_right"]:
+                return True
+        
+        # Default: allow the operation
+        return True
+    
+    # Original behavior when called without prefix and next_op
     useful_ops = set()
     
     # If shapes match, transformations are likely useful

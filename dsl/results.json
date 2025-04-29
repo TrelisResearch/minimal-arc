@@ -4,7 +4,7 @@
     "solved": true,
     "correct": true,
     "program": "Program(tile_2x2, rot180, crop_center_half)",
-    "elapsed_time": 0.10629701614379883,
+    "elapsed_time": 0.08767390251159668,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -13,7 +13,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 6.011060953140259,
+    "elapsed_time": 6.1022679805755615,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -22,7 +22,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 7.342403888702393,
+    "elapsed_time": 7.564471006393433,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -31,7 +31,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 0.0007202625274658203,
+    "elapsed_time": 0.0008959770202636719,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -40,7 +40,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 8.334810018539429,
+    "elapsed_time": 8.565476655960083,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -49,7 +49,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 9.124157905578613,
+    "elapsed_time": 9.167014837265015,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -58,7 +58,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 10.776066064834595,
+    "elapsed_time": 10.848409175872803,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -67,7 +67,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 13.40383791923523,
+    "elapsed_time": 13.527899026870728,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -76,7 +76,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 11.806384086608887,
+    "elapsed_time": 10.840499877929688,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -85,7 +85,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 10.506181955337524,
+    "elapsed_time": 9.428962707519531,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -94,7 +94,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 8.380339860916138,
+    "elapsed_time": 7.720521926879883,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -103,7 +103,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 4.484262943267822,
+    "elapsed_time": 4.12452507019043,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -112,7 +112,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 18.394893169403076,
+    "elapsed_time": 16.926512002944946,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -121,7 +121,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 21.645970821380615,
+    "elapsed_time": 20.268298864364624,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -130,7 +130,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 34.75895714759827,
+    "elapsed_time": 32.925520181655884,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -139,7 +139,7 @@
     "solved": true,
     "correct": true,
     "program": "Program(crop_center_third, crop_center_third, shift_up_pad, replace_0_to_1)",
-    "elapsed_time": 14.494375228881836,
+    "elapsed_time": 13.900468111038208,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -148,7 +148,7 @@
     "solved": true,
     "correct": true,
     "program": "Program(crop_center_half, crop_center_third, mask_c1, replace_0_to_1)",
-    "elapsed_time": 52.00044107437134,
+    "elapsed_time": 51.66187596321106,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -157,7 +157,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 55.92790913581848,
+    "elapsed_time": 55.06625413894653,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -166,7 +166,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 60.896626234054565,
+    "elapsed_time": 58.628759145736694,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -175,7 +175,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 112.66530084609985,
+    "elapsed_time": 112.93330001831055,
     "search_exhausted": true,
     "search_timed_out": false
   }
