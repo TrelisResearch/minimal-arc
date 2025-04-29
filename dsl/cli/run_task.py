@@ -20,31 +20,8 @@ sys.path.insert(0, str(project_root))
 from dsl.dsl_utils.primitives import ALL_PRIMITIVES, TILE_PATTERN, print_primitives_summary
 from dsl.dsl_utils.types import Grid
 from dsl.dsl_utils.program import Program, TimeoutException
-from dsl.search.enumerator import iter_deepening
-from dsl.search.verifier import verify, evaluate_program
+from dsl.solver.task_solver import solve_task, evaluate_program
 from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input
-
-
-def evaluate_program(program, input_grid, op_timeout=0.25):
-    """
-    Evaluate a program on an input grid with timeout handling.
-    
-    Args:
-        program: The program to evaluate
-        input_grid: The input grid
-        op_timeout: Timeout for individual operations in seconds
-        
-    Returns:
-        The result of running the program, or None if an error occurs
-    """
-    try:
-        return program.run(input_grid, op_timeout=op_timeout)
-    except TimeoutException:
-        print("Operation timed out during evaluation")
-        return None
-    except Exception as e:
-        print(f"Error during evaluation: {e}")
-        return None
 
 
 def main():
@@ -60,6 +37,7 @@ def main():
     parser.add_argument('--parallel', action='store_true', default=True, help='Use parallel search (default: True)')
     parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search')
     parser.add_argument('--op-timeout', type=float, default=0.25, help='Timeout for individual operations in seconds (default: 0.25)')
+    parser.add_argument('--debug', action='store_true', help='Print debug information')
     
     args = parser.parse_args()
     
@@ -201,48 +179,26 @@ def main():
             print(f"Program: {program}")
             return
     
-    # Get shapes for heuristics
-    input_shape = train_pairs[0][0].shape
-    output_shape = train_pairs[0][1].shape
+    # Solve the task using the unified solver
+    result = solve_task(
+        task_id=args.task_id,
+        train_pairs=train_pairs,
+        test_input=test_input,
+        depth=args.depth,
+        timeout=args.timeout,
+        op_timeout=args.op_timeout,
+        parallel=args.parallel,
+        num_processes=args.num_processes,
+        debug=args.debug or True  # Always show debug output for single task
+    )
     
-    print(f"Input shape: {input_shape}, Output shape: {output_shape}")
-    print(f"Searching for programs with max depth {args.depth}...")
-    
-    # Start the search
-    start_time = time.time()
-    found_solution = False
-    valid_program = None
-    prediction = None
-    
-    # Generate and verify programs
-    for program in iter_deepening(ALL_PRIMITIVES, args.depth, input_shape, output_shape, args.timeout, 
-                                 args.parallel, args.num_processes):
-        try:
-            if verify(program, train_pairs, op_timeout=args.op_timeout):
-                valid_program = program
-                found_solution = True
-                print(f"Found valid program: {program}")
-                
-                # Generate prediction for the test input
-                prediction = evaluate_program(program, test_input, op_timeout=args.op_timeout)
-                if prediction is not None:
-                    print(f"Generated prediction for test input")
-                else:
-                    print(f"Failed to generate prediction for test input")
-                
-                break
-        except TimeoutException:
-            print(f"Program timed out during verification: {program}")
-            continue
-        except Exception as e:
-            print(f"Error during verification: {e}")
-            continue
-    
-    elapsed_time = time.time() - start_time
-    print(f"Search completed in {elapsed_time:.2f} seconds")
+    # Extract results
+    found_solution = result['solved']
+    valid_program = result['program']
+    prediction = result['prediction']
+    elapsed_time = result['elapsed_time']
     
     if not found_solution:
-        print("No solution found")
         return
     
     # Visualize the results

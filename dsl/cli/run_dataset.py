@@ -9,7 +9,7 @@ import sys
 import os
 import json
 from pathlib import Path
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from functools import partial
 from tqdm import tqdm
 import numpy as np
@@ -19,15 +19,14 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from dsl.dsl_utils.primitives import ALL_PRIMITIVES, print_primitives_summary
 from dsl.dsl_utils.types import Grid
-from dsl.search.enumerator import iter_deepening
-from dsl.search.verifier import verify, evaluate_program
-from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input, load_id_list
+from dsl.solver.task_solver import solve_task
+from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input
 from dsl.io.visualizer import visualize_task, save_visualization
 
 
-def solve_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
+def process_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
     """
-    Solve a single task.
+    Process a single task.
     
     Args:
         task_id: The task ID
@@ -56,29 +55,22 @@ def solve_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
         except Exception:
             pass
         
-        # Get shapes for heuristics
-        input_shape = train_pairs[0][0].shape
-        output_shape = train_pairs[0][1].shape
+        # Solve the task using the unified solver
+        result = solve_task(
+            task_id=task_id,
+            train_pairs=train_pairs,
+            test_input=test_input,
+            depth=depth,
+            timeout=timeout,
+            op_timeout=op_timeout,
+            parallel=False,  # Don't use parallel within a process that's already parallelized
+            debug=False
+        )
         
-        # Start the search
-        found_solution = False
-        valid_program = None
-        prediction = None
-        
-        # Generate and verify programs
-        for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, True):
-            try:
-                if verify(program, train_pairs, op_timeout=op_timeout):
-                    valid_program = program
-                    found_solution = True
-                    
-                    # Generate prediction for the test input
-                    prediction = evaluate_program(program, test_input, op_timeout=op_timeout)
-                    break
-            except TimeoutException:
-                continue  # Skip programs that time out
-            except Exception as e:
-                continue  # Skip programs that raise exceptions
+        # Extract results
+        found_solution = result['solved']
+        valid_program = result['program']
+        prediction = result['prediction']
         
         # Check if the prediction matches the solution
         correct = False
@@ -94,35 +86,17 @@ def solve_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
             'task_id': task_id,
             'solved': found_solution,
             'correct': correct,
-            'program': str(valid_program) if valid_program else None
+            'program': str(valid_program) if valid_program else None,
+            'elapsed_time': result['elapsed_time']
         }
     except Exception as e:
         return {
             'task_id': task_id,
             'solved': False,
             'correct': False,
-            'error': str(e)
+            'error': str(e),
+            'elapsed_time': 0
         }
-
-
-def evaluate_program(program, input_grid, op_timeout=0.25):
-    """
-    Evaluate a program on an input grid with timeout handling.
-    
-    Args:
-        program: The program to evaluate
-        input_grid: The input grid
-        op_timeout: Timeout for individual operations in seconds
-        
-    Returns:
-        The result of running the program, or None if an error occurs
-    """
-    try:
-        return program.run(input_grid, op_timeout=op_timeout)
-    except TimeoutException:
-        return None
-    except Exception as e:
-        return None
 
 
 def main():
@@ -162,7 +136,7 @@ def main():
     
     # Set up parallel processing
     if args.parallel is None:
-        num_processes = max(1, multiprocessing.cpu_count() - 1)
+        num_processes = max(1, cpu_count() - 1)
     else:
         num_processes = args.parallel
     
@@ -175,8 +149,8 @@ def main():
     # Run tasks in parallel
     with Pool(processes=num_processes) as pool:
         # Create a partial function with fixed arguments
-        run_task_partial = partial(
-            solve_task,
+        process_task_partial = partial(
+            process_task,
             depth=args.depth,
             timeout=args.timeout,
             data_path=args.data_path,
@@ -186,24 +160,23 @@ def main():
         
         # Map the function to the task IDs with a progress bar
         results = list(tqdm(
-            pool.imap_unordered(run_task_partial, task_ids),
+            pool.imap_unordered(process_task_partial, task_ids),
             total=len(task_ids),
             desc="Processing tasks"
         ))
     
     # Count successful tasks
     solved_count = sum(1 for result in results if result['solved'])
-    correct_count = sum(1 for result in results if result['correct'])
+    correct_count = sum(1 for result in results if result.get('correct', False))
     
     print(f"Results: {solved_count}/{len(task_ids)} tasks solved")
     print(f"Correct: {correct_count}/{len(task_ids)} predictions match solutions")
     
     # Save results to a file
-    if args.save_dir:
-        results_path = os.path.join(args.save_dir, args.results_file)
-        with open(results_path, 'w') as f:
+    if args.results_file:
+        with open(args.results_file, 'w') as f:
             json.dump(results, f, indent=2)
-        print(f"Results saved to {results_path}")
+        print(f"Results saved to {args.results_file}")
 
 
 if __name__ == '__main__':
