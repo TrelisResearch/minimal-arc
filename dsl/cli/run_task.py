@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 
 # Fix the import path issue
 current_dir = Path(__file__).parent
@@ -35,7 +36,7 @@ def main():
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--direct-test', action='store_true', help='Directly test the tile_pattern function')
     parser.add_argument('--parallel', action='store_true', default=True, help='Use parallel search (default: True)')
-    parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search')
+    parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search (default: CPU count - 1)')
     parser.add_argument('--op-timeout', type=float, default=0.25, help='Timeout for individual operations in seconds (default: 0.25)')
     parser.add_argument('--debug', action='store_true', help='Print debug information')
     
@@ -60,6 +61,12 @@ def main():
         solution = Grid(solution_grid)
     except Exception as e:
         print(f"Warning: Could not load solution: {e}")
+    
+    # Set up parallel processing
+    if args.num_processes is None:
+        num_processes = max(1, mp.cpu_count() - 1)
+    else:
+        num_processes = args.num_processes
     
     # Direct test for the tile_pattern function
     if args.direct_test and args.task_id == "00576224":
@@ -188,17 +195,21 @@ def main():
         timeout=args.timeout,
         op_timeout=args.op_timeout,
         parallel=args.parallel,
-        num_processes=args.num_processes,
-        debug=args.debug or True  # Always show debug output for single task
+        num_processes=num_processes,
+        debug=args.debug
     )
     
-    # Extract results
     found_solution = result['solved']
     valid_program = result['program']
     prediction = result['prediction']
     elapsed_time = result['elapsed_time']
+    search_exhausted = result.get('search_exhausted', False)
     
     if not found_solution:
+        if search_exhausted:
+            print("No solution found: Search space exhausted (all programs up to depth tried)")
+        else:
+            print(f"No solution found: Search timed out after {args.timeout} seconds")
         return
     
     # Visualize the results

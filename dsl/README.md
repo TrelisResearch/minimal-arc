@@ -5,7 +5,8 @@ A minimal DSL (Domain-Specific Language) implementation for solving ARC (Abstrac
 ## Notes on Getting DSL to Work.
 
 1. Primitives must be unary, i.e. you must define a set of operations on the input grid that ONLY require the input grid to be passed. What the operation does (rotate, flip, flood fill) should be entirely described by the oepration. Often this means creating multiple versions of one operation (e.g. a flood fill operation for each of ten colours).
-2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill.
+2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill. AT THIS POINT, YOU SHOULD BE ABLE TO SOLVE AT LEAST ONE MIT-EASY PROBLEM.
+3. ADD HASHES FOR OUTPUTS/INTERMEDIATE STATES ALREADY VISITED, SO THAT THOSE ARE PRUNED.
 
 ## Quick Start
 
@@ -16,11 +17,45 @@ uv add numpy matplotlib tqdm pydantic
 uv sync # if cloning the repo
 
 # Run on a single task
-uv run cli/run_task.py 692cd3b6 --depth 4 --show --parallel
+uv run cli/run_task.py 66e6c45b --depth 4 --show --data-path ../arc-data-cleaned
 
 # Run on a dataset
-uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 6 --parallel 32 --save-dir results
+uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 30 --save-dir results --data-path ../arc-data-cleaned
 ```
+
+## Command Line Options
+
+### Running a Single Task
+
+```bash
+uv run cli/run_task.py <task_id> [options]
+```
+
+Options:
+- `--depth INT`: Maximum search depth (default: 4)
+- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
+- `--show`: Show visualization
+- `--save PATH`: Save visualization to file
+- `--data-path PATH`: Path to the data directory
+- `--parallel`: Use parallel search (default: True)
+- `--num-processes INT`: Number of processes to use (default: CPU count - 1)
+- `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
+- `--debug`: Print debug information
+
+### Running a Dataset
+
+```bash
+uv run cli/run_dataset.py <json_file> [options]
+```
+
+Options:
+- `--depth INT`: Maximum search depth (default: 4)
+- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
+- `--parallel INT`: Number of parallel processes (default: CPU count - 1)
+- `--data-path PATH`: Path to the data directory
+- `--save-dir PATH`: Directory to save results
+- `--results-file PATH`: File to save results (default: results.json)
+- `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
 
 ## How It Works
 

@@ -86,6 +86,8 @@ def worker_process(
             found_solution = False
             valid_program = None
             prediction = None
+            search_exhausted = False
+            search_timed_out = False
             
             # Generate and verify programs
             try:
@@ -93,6 +95,9 @@ def worker_process(
                     # Check if we've exceeded the timeout
                     current_time = time.time()
                     if current_time > end_time:
+                        search_timed_out = True
+                        if debug:
+                            print(f"Task {task_id}: Search timed out after {timeout} seconds")
                         break
                         
                     try:
@@ -109,8 +114,27 @@ def worker_process(
                             break
                     except Exception:
                         continue
-            except Exception:
-                pass
+            except TimeoutException:
+                search_timed_out = True
+                if debug:
+                    print(f"Task {task_id}: Search timed out after {timeout} seconds")
+            except StopIteration:
+                # This means the search space was exhausted
+                search_exhausted = True
+                if debug:
+                    print(f"Task {task_id}: Search space exhausted (all programs up to depth tried)")
+            except Exception as e:
+                if debug:
+                    print(f"Task {task_id}: Unexpected error during search: {e}")
+            
+            # If no prediction was generated, report why
+            if not found_solution and debug:
+                if search_exhausted:
+                    print(f"Task {task_id}: No prediction generated - Search space exhausted")
+                elif search_timed_out:
+                    print(f"Task {task_id}: No prediction generated - Search timed out after {timeout} seconds")
+                else:
+                    print(f"Task {task_id}: No prediction generated")
             
             elapsed_time = time.time() - start_time
             
@@ -153,7 +177,9 @@ def worker_process(
                 'solved': found_solution,
                 'correct': correct,
                 'program': str(valid_program) if valid_program else None,
-                'elapsed_time': elapsed_time
+                'elapsed_time': elapsed_time,
+                'search_exhausted': search_exhausted,
+                'search_timed_out': search_timed_out
             })
         except Exception as e:
             # Put an error result in the result queue
@@ -162,7 +188,9 @@ def worker_process(
                 'solved': False,
                 'correct': False,
                 'error': str(e),
-                'elapsed_time': 0
+                'elapsed_time': 0,
+                'search_exhausted': False,
+                'search_timed_out': False
             })
 
 

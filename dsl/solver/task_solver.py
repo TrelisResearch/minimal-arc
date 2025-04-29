@@ -46,6 +46,8 @@ def solve_task(
         - program: The program that solves the task (if found)
         - prediction: The prediction for the test input (if available)
         - elapsed_time: Time taken to find the solution
+        - search_exhausted: Whether the search space was exhausted
+        - search_timed_out: Whether the search timed out
     """
     # Get shapes for heuristics
     input_shape = train_pairs[0][0].shape
@@ -63,6 +65,10 @@ def solve_task(
     
     # Use a more reliable timeout approach
     end_time = start_time + timeout
+    
+    # Track whether search was exhausted or timed out
+    search_exhausted = False
+    search_timed_out = False
     
     # Check if we're running in a multiprocessing context
     # If we are, we should disable parallel search to avoid nested parallelism
@@ -87,6 +93,7 @@ def solve_task(
             if current_time > end_time:
                 if debug:
                     print(f"Search timed out after {timeout} seconds")
+                search_timed_out = True
                 break
                 
             try:
@@ -126,6 +133,12 @@ def solve_task(
     except TimeoutException:
         if debug:
             print(f"Search timed out after {timeout} seconds")
+        search_timed_out = True
+    except StopIteration:
+        # This means the search space was exhausted
+        if debug:
+            print("Search space exhausted (all programs up to depth tried)")
+        search_exhausted = True
     except Exception as e:
         if debug:
             print(f"Unexpected error during search: {e}")
@@ -135,14 +148,21 @@ def solve_task(
     if debug:
         print(f"Search completed in {elapsed_time:.2f} seconds")
         if not found_solution:
-            print("No solution found")
+            if search_exhausted:
+                print("No solution found: Search space exhausted")
+            elif search_timed_out:
+                print(f"No solution found: Search timed out after {timeout} seconds")
+            else:
+                print("No solution found")
     
     return {
         'task_id': task_id,
         'solved': found_solution,
         'program': valid_program,
         'prediction': prediction,
-        'elapsed_time': elapsed_time
+        'elapsed_time': elapsed_time,
+        'search_exhausted': search_exhausted,
+        'search_timed_out': search_timed_out
     }
 
 

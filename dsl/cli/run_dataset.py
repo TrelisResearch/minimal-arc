@@ -43,7 +43,7 @@ def main():
     parser.add_argument('json_file', type=str, help='Path to the JSON file containing task IDs')
     parser.add_argument('--depth', type=int, default=4, help='Maximum search depth (default: 4)')
     parser.add_argument('--timeout', type=float, default=3.0, help='Search timeout in seconds (default: 15.0)')
-    parser.add_argument('--parallel', type=int, help='Number of parallel processes (default: CPU count - 1)')
+    parser.add_argument('--parallel', type=int, default=mp.cpu_count() - 1, help='Number of parallel processes (default: CPU count - 1)')
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--save-dir', type=str, help='Directory to save results')
     parser.add_argument('--results-file', type=str, default='results.json', help='File to save results (default: results.json)')
@@ -73,10 +73,7 @@ def main():
     print(f"Loaded {len(task_ids)} task IDs from {args.json_file}")
     
     # Set up parallel processing
-    if args.parallel is None:
-        num_processes = max(1, mp.cpu_count() - 1)
-    else:
-        num_processes = args.parallel
+    num_processes = args.parallel
     
     print(f"Running {len(task_ids)} tasks with {num_processes} parallel processes...")
     
