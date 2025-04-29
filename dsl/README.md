@@ -2,6 +2,11 @@
 
 A minimal DSL (Domain-Specific Language) implementation for solving ARC (Abstraction and Reasoning Corpus) tasks.
 
+## Notes on Getting DSL to Work.
+
+1. Primitives must be unary, i.e. you must define a set of operations on the input grid that ONLY require the input grid to be passed. What the operation does (rotate, flip, flood fill) should be entirely described by the oepration. Often this means creating multiple versions of one operation (e.g. a flood fill operation for each of ten colours).
+2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill.
+
 ## Quick Start
 
 ```bash
@@ -11,7 +16,7 @@ uv add numpy matplotlib tqdm pydantic
 uv sync # if cloning the repo
 
 # Run on a single task
-uv run cli/run_task.py 0a1d4ef5 --depth 4 --show --parallel
+uv run cli/run_task.py 692cd3b6 --depth 4 --show --parallel
 
 # Run on a dataset
 uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 6 --parallel 32 --save-dir results

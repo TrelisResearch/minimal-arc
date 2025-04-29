@@ -43,7 +43,7 @@ def rot180_fn(grid: Grid) -> Grid:
 
 def rot270_fn(grid: Grid) -> Grid:
     """Rotate the grid 270 degrees clockwise (90 degrees counterclockwise)."""
-    return Grid(np.rot90(grid.data, k=1))
+    return Grid(np.rot90(grid.data, k=3, axes=(1, 0)))
 
 
 def flip_h_fn(grid: Grid) -> Grid:
@@ -67,57 +67,153 @@ def color_mask_fn(grid: Grid, color: int) -> Grid:
     return Grid(mask)
 
 
-def flood_fill_fn(grid: Grid, row: int, col: int, new_color: int) -> Grid:
+def fill_holes_fn(grid: Grid) -> Grid:
     """
-    Perform a flood fill operation starting from the specified position.
-    
-    Args:
-        grid: The input grid
-        row: The starting row
-        col: The starting column
-        new_color: The color to fill with
-        
-    Returns:
-        A new grid with the flood fill applied
+    Fill holes in the grid by flood filling from the border with color 0, then inverting.
+    This creates a binary mask where all enclosed regions are filled.
     """
-    # Create a copy of the grid
     result = grid.copy()
     height, width = result.data.shape
     
-    # Get the original color
-    if not (0 <= row < height and 0 <= col < width):
-        return result  # Out of bounds, return unchanged
+    # Create a mask that's 1 pixel larger on all sides
+    mask = np.zeros((height + 2, width + 2), dtype=np.int32)
     
-    original_color = result.data[row, col]
+    # Copy the original grid to the center of the mask
+    mask[1:-1, 1:-1] = (result.data != 0).astype(np.int32)
     
-    # If the original color is already the new color, no need to fill
-    if original_color == new_color:
-        return result
-    
-    # Use an iterative approach with a queue instead of recursion
-    queue = [(row, col)]
+    # Flood fill from the border (0,0) with a temporary color (-1)
+    queue = deque([(0, 0)])
     visited = set()
     
     while queue:
-        r, c = queue.pop(0)
+        r, c = queue.popleft()
         
-        # Skip if already visited or out of bounds
+        if (r, c) in visited or not (0 <= r < height + 2 and 0 <= c < width + 2):
+            continue
+            
+        if mask[r, c] == 0:  # Only fill empty space
+            mask[r, c] = -1
+            visited.add((r, c))
+            
+            # Add neighbors
+            queue.append((r-1, c))
+            queue.append((r+1, c))
+            queue.append((r, c-1))
+            queue.append((r, c+1))
+    
+    # Create the filled result - anything that wasn't reached by the flood fill is a hole
+    filled = np.zeros_like(result.data)
+    for r in range(height):
+        for c in range(width):
+            if mask[r+1, c+1] == 0:  # This was a hole (not reached by border flood fill)
+                filled[r, c] = 1
+            else:
+                filled[r, c] = result.data[r, c]
+    
+    return Grid(filled)
+
+def fill_background_0_fn(grid: Grid) -> Grid:
+    """Fill the background (connected to border) with color 0."""
+    return _fill_background(grid, 0)
+
+def fill_background_1_fn(grid: Grid) -> Grid:
+    """Fill the background (connected to border) with color 1."""
+    return _fill_background(grid, 1)
+
+def fill_background_2_fn(grid: Grid) -> Grid:
+    """Fill the background (connected to border) with color 2."""
+    return _fill_background(grid, 2)
+
+def fill_background_3_fn(grid: Grid) -> Grid:
+    """Fill the background (connected to border) with color 3."""
+    return _fill_background(grid, 3)
+
+def _fill_background(grid: Grid, color: int) -> Grid:
+    """
+    Helper function to fill the background (connected to border) with a specific color.
+    """
+    result = grid.copy()
+    height, width = result.data.shape
+    
+    # Start flood fill from all border pixels
+    queue = deque()
+    visited = set()
+    
+    # Add all border pixels to the queue
+    for r in range(height):
+        queue.append((r, 0))
+        queue.append((r, width - 1))
+    
+    for c in range(width):
+        queue.append((0, c))
+        queue.append((height - 1, c))
+    
+    # Perform flood fill
+    while queue:
+        r, c = queue.popleft()
+        
         if (r, c) in visited or not (0 <= r < height and 0 <= c < width):
             continue
         
-        # Skip if not the original color
-        if result.data[r, c] != original_color:
-            continue
-        
-        # Fill this pixel
-        result.data[r, c] = new_color
+        # Mark as visited
         visited.add((r, c))
         
-        # Add neighbors to the queue
-        queue.append((r-1, c))  # Up
-        queue.append((r+1, c))  # Down
-        queue.append((r, c-1))  # Left
-        queue.append((r, c+1))  # Right
+        # Fill with the specified color
+        result.data[r, c] = color
+        
+        # Add neighbors
+        queue.append((r-1, c))
+        queue.append((r+1, c))
+        queue.append((r, c-1))
+        queue.append((r, c+1))
+    
+    return result
+
+def flood_object_fn(grid: Grid) -> Grid:
+    """
+    Find the top-left non-zero pixel and flood with its color.
+    This is useful for filling in objects that might have gaps.
+    """
+    result = grid.copy()
+    height, width = result.data.shape
+    
+    # Find the first non-zero pixel
+    start_r, start_c = -1, -1
+    start_color = 0
+    
+    for r in range(height):
+        for c in range(width):
+            if result.data[r, c] != 0:
+                start_r, start_c = r, c
+                start_color = result.data[r, c]
+                break
+        if start_r != -1:
+            break
+    
+    # If no non-zero pixel found, return the original grid
+    if start_r == -1:
+        return result
+    
+    # Perform flood fill from the first non-zero pixel
+    queue = deque([(start_r, start_c)])
+    visited = set()
+    
+    while queue:
+        r, c = queue.popleft()
+        
+        if (r, c) in visited or not (0 <= r < height and 0 <= c < width):
+            continue
+        
+        # Only fill pixels that are either the same color or zero
+        if result.data[r, c] == start_color or result.data[r, c] == 0:
+            result.data[r, c] = start_color
+            visited.add((r, c))
+            
+            # Add neighbors
+            queue.append((r-1, c))
+            queue.append((r+1, c))
+            queue.append((r, c-1))
+            queue.append((r, c+1))
     
     return result
 
@@ -244,12 +340,9 @@ def tile_pattern_fn(grid: Grid) -> Grid:
     for i in range(3):
         result[0:2, i*2:(i+1)*2] = grid.data
     
-    # Rows 2-3: Flip the pattern horizontally
-    # The test expects this specific pattern
-    flipped = np.array([
-        [2, 1],
-        [4, 3]
-    ])
+    # Rows 2-3: Flip the pattern both horizontally and vertically
+    # This is a generic version that works for any color layout
+    flipped = np.fliplr(np.flipud(grid.data))
     for i in range(3):
         result[2:4, i*2:(i+1)*2] = flipped
     
@@ -353,77 +446,64 @@ def crop_tr_half_fn(g): return crop_fn(g, 0, g.shape[1]//2, g.shape[0]//2, g.sha
 def crop_bl_half_fn(g): return crop_fn(g, g.shape[0]//2, 0, g.shape[0]//2, g.shape[1]//2)
 def crop_br_half_fn(g): return crop_fn(g, g.shape[0]//2, g.shape[1]//2, g.shape[0]//2, g.shape[1]//2)
 
-CROP_TL_HALF = Op("crop_tl_half", crop_tl_half_fn, Grid_T, Grid_T)
-CROP_TR_HALF = Op("crop_tr_half", crop_tr_half_fn, Grid_T, Grid_T)
-CROP_BL_HALF = Op("crop_bl_half", crop_bl_half_fn, Grid_T, Grid_T)
-CROP_BR_HALF = Op("crop_br_half", crop_br_half_fn, Grid_T, Grid_T)
+# CROP_TL_HALF = Op("crop_tl_half", crop_tl_half_fn, Grid_T, Grid_T)
+# CROP_TR_HALF = Op("crop_tr_half", crop_tr_half_fn, Grid_T, Grid_T)
+# CROP_BL_HALF = Op("crop_bl_half", crop_bl_half_fn, Grid_T, Grid_T)
+# CROP_BR_HALF = Op("crop_br_half", crop_br_half_fn, Grid_T, Grid_T)
 
 # Replace color operations for common color pairs
 def replace_0_to_1_fn(g): return replace_color_fn(g, 0, 1)
 def replace_1_to_2_fn(g): return replace_color_fn(g, 1, 2)
-def replace_2_to_3_fn(g): return replace_color_fn(g, 2, 3)
-def replace_3_to_4_fn(g): return replace_color_fn(g, 3, 4)
-def replace_4_to_5_fn(g): return replace_color_fn(g, 4, 5)
-def replace_5_to_6_fn(g): return replace_color_fn(g, 5, 6)
-def replace_6_to_7_fn(g): return replace_color_fn(g, 6, 7)
-def replace_7_to_8_fn(g): return replace_color_fn(g, 7, 8)
-def replace_8_to_9_fn(g): return replace_color_fn(g, 8, 9)
-def replace_9_to_1_fn(g): return replace_color_fn(g, 9, 1)
+# def replace_2_to_3_fn(g): return replace_color_fn(g, 2, 3)
+# def replace_3_to_4_fn(g): return replace_color_fn(g, 3, 4)
+# def replace_4_to_5_fn(g): return replace_color_fn(g, 4, 5)
+# def replace_5_to_6_fn(g): return replace_color_fn(g, 5, 6)
+# def replace_6_to_7_fn(g): return replace_color_fn(g, 6, 7)
+# def replace_7_to_8_fn(g): return replace_color_fn(g, 7, 8)
+# def replace_8_to_9_fn(g): return replace_color_fn(g, 8, 9)
+# def replace_9_to_1_fn(g): return replace_color_fn(g, 9, 1)
 
 REPLACE_0_TO_1 = Op("replace_0_to_1", replace_0_to_1_fn, Grid_T, Grid_T)
 REPLACE_1_TO_2 = Op("replace_1_to_2", replace_1_to_2_fn, Grid_T, Grid_T)
-REPLACE_2_TO_3 = Op("replace_2_to_3", replace_2_to_3_fn, Grid_T, Grid_T)
-REPLACE_3_TO_4 = Op("replace_3_to_4", replace_3_to_4_fn, Grid_T, Grid_T)
-REPLACE_4_TO_5 = Op("replace_4_to_5", replace_4_to_5_fn, Grid_T, Grid_T)
-REPLACE_5_TO_6 = Op("replace_5_to_6", replace_5_to_6_fn, Grid_T, Grid_T)
-REPLACE_6_TO_7 = Op("replace_6_to_7", replace_6_to_7_fn, Grid_T, Grid_T)
-REPLACE_7_TO_8 = Op("replace_7_to_8", replace_7_to_8_fn, Grid_T, Grid_T)
-REPLACE_8_TO_9 = Op("replace_8_to_9", replace_8_to_9_fn, Grid_T, Grid_T)
-REPLACE_9_TO_1 = Op("replace_9_to_1", replace_9_to_1_fn, Grid_T, Grid_T)
+# REPLACE_2_TO_3 = Op("replace_2_to_3", replace_2_to_3_fn, Grid_T, Grid_T)
+# REPLACE_3_TO_4 = Op("replace_3_to_4", replace_3_to_4_fn, Grid_T, Grid_T)
+# REPLACE_4_TO_5 = Op("replace_4_to_5", replace_4_to_5_fn, Grid_T, Grid_T)
+# REPLACE_5_TO_6 = Op("replace_5_to_6", replace_5_to_6_fn, Grid_T, Grid_T)
+# REPLACE_6_TO_7 = Op("replace_6_to_7", replace_6_to_7_fn, Grid_T, Grid_T)
+# REPLACE_7_TO_8 = Op("replace_7_to_8", replace_7_to_8_fn, Grid_T, Grid_T)
+# REPLACE_8_TO_9 = Op("replace_8_to_9", replace_8_to_9_fn, Grid_T, Grid_T)
+# REPLACE_9_TO_1 = Op("replace_9_to_1", replace_9_to_1_fn, Grid_T, Grid_T)
 
-# Flood fill operations for key positions and colors
-# Center fill with different colors
-def fill_center_1_fn(g): return flood_fill_fn(g, g.shape[0]//2, g.shape[1]//2, 1)
-def fill_center_2_fn(g): return flood_fill_fn(g, g.shape[0]//2, g.shape[1]//2, 2)
-def fill_center_3_fn(g): return flood_fill_fn(g, g.shape[0]//2, g.shape[1]//2, 3)
-
-FILL_CENTER_1 = Op("fill_center_1", fill_center_1_fn, Grid_T, Grid_T)
-FILL_CENTER_2 = Op("fill_center_2", fill_center_2_fn, Grid_T, Grid_T)
-FILL_CENTER_3 = Op("fill_center_3", fill_center_3_fn, Grid_T, Grid_T)
-
-# Corner fills
-def fill_tl_1_fn(g): return flood_fill_fn(g, 0, 0, 1)
-def fill_tr_1_fn(g): return flood_fill_fn(g, 0, g.shape[1]-1, 1)
-def fill_bl_1_fn(g): return flood_fill_fn(g, g.shape[0]-1, 0, 1)
-def fill_br_1_fn(g): return flood_fill_fn(g, g.shape[0]-1, g.shape[1]-1, 1)
-
-FILL_TL_1 = Op("fill_tl_1", fill_tl_1_fn, Grid_T, Grid_T)
-FILL_TR_1 = Op("fill_tr_1", fill_tr_1_fn, Grid_T, Grid_T)
-FILL_BL_1 = Op("fill_bl_1", fill_bl_1_fn, Grid_T, Grid_T)
-FILL_BR_1 = Op("fill_br_1", fill_br_1_fn, Grid_T, Grid_T)
+# More efficient flood fill operations
+FILL_HOLES = Op("fill_holes", fill_holes_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_0 = Op("fill_background_0", fill_background_0_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_1 = Op("fill_background_1", fill_background_1_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_2 = Op("fill_background_2", fill_background_2_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_3 = Op("fill_background_3", fill_background_3_fn, Grid_T, Grid_T)
+FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)
 
 # Count color operations
-def count_c0_fn(g): return count_color_fn(g, 0)
-def count_c1_fn(g): return count_color_fn(g, 1)
-def count_c2_fn(g): return count_color_fn(g, 2)
-def count_c3_fn(g): return count_color_fn(g, 3)
-def count_c4_fn(g): return count_color_fn(g, 4)
-def count_c5_fn(g): return count_color_fn(g, 5)
-def count_c6_fn(g): return count_color_fn(g, 6)
-def count_c7_fn(g): return count_color_fn(g, 7)
-def count_c8_fn(g): return count_color_fn(g, 8)
-def count_c9_fn(g): return count_color_fn(g, 9)
+# def count_c0_fn(g): return count_color_fn(g, 0)
+# def count_c1_fn(g): return count_color_fn(g, 1)
+# def count_c2_fn(g): return count_color_fn(g, 2)
+# def count_c3_fn(g): return count_color_fn(g, 3)
+# def count_c4_fn(g): return count_color_fn(g, 4)
+# def count_c5_fn(g): return count_color_fn(g, 5)
+# def count_c6_fn(g): return count_color_fn(g, 6)
+# def count_c7_fn(g): return count_color_fn(g, 7)
+# def count_c8_fn(g): return count_color_fn(g, 8)
+# def count_c9_fn(g): return count_color_fn(g, 9)
 
-COUNT_C_0 = Op("count_c0", count_c0_fn, Grid_T, Int_T)
-COUNT_C_1 = Op("count_c1", count_c1_fn, Grid_T, Int_T)
-COUNT_C_2 = Op("count_c2", count_c2_fn, Grid_T, Int_T)
-COUNT_C_3 = Op("count_c3", count_c3_fn, Grid_T, Int_T)
-COUNT_C_4 = Op("count_c4", count_c4_fn, Grid_T, Int_T)
-COUNT_C_5 = Op("count_c5", count_c5_fn, Grid_T, Int_T)
-COUNT_C_6 = Op("count_c6", count_c6_fn, Grid_T, Int_T)
-COUNT_C_7 = Op("count_c7", count_c7_fn, Grid_T, Int_T)
-COUNT_C_8 = Op("count_c8", count_c8_fn, Grid_T, Int_T)
-COUNT_C_9 = Op("count_c9", count_c9_fn, Grid_T, Int_T)
+# COUNT_C_0 = Op("count_c0", count_c0_fn, Grid_T, Int_T)
+# COUNT_C_1 = Op("count_c1", count_c1_fn, Grid_T, Int_T)
+# COUNT_C_2 = Op("count_c2", count_c2_fn, Grid_T, Int_T)
+# COUNT_C_3 = Op("count_c3", count_c3_fn, Grid_T, Int_T)
+# COUNT_C_4 = Op("count_c4", count_c4_fn, Grid_T, Int_T)
+# COUNT_C_5 = Op("count_c5", count_c5_fn, Grid_T, Int_T)
+# COUNT_C_6 = Op("count_c6", count_c6_fn, Grid_T, Int_T)
+# COUNT_C_7 = Op("count_c7", count_c7_fn, Grid_T, Int_T)
+# COUNT_C_8 = Op("count_c8", count_c8_fn, Grid_T, Int_T)
+# COUNT_C_9 = Op("count_c9", count_c9_fn, Grid_T, Int_T)
 
 # List of all primitives - replace with the grounded list
 ALL_PRIMITIVES = [
@@ -440,17 +520,52 @@ ALL_PRIMITIVES = [
     
     # Grounded crop operations
     CROP_CENTER_HALF, CROP_CENTER_THIRD,
-    CROP_TL_HALF, CROP_TR_HALF, CROP_BL_HALF, CROP_BR_HALF,
+    # CROP_TL_HALF, CROP_TR_HALF, CROP_BL_HALF, CROP_BR_HALF,
     
     # Grounded replace color operations
-    REPLACE_0_TO_1, REPLACE_1_TO_2, REPLACE_2_TO_3, REPLACE_3_TO_4, REPLACE_4_TO_5,
-    REPLACE_5_TO_6, REPLACE_6_TO_7, REPLACE_7_TO_8, REPLACE_8_TO_9, REPLACE_9_TO_1,
+    REPLACE_0_TO_1,  # Background to color 1
+    REPLACE_1_TO_2,  # Swap non-zero colors
+    # REPLACE_2_TO_3, REPLACE_3_TO_4, REPLACE_4_TO_5,
+    # REPLACE_5_TO_6, REPLACE_6_TO_7, REPLACE_7_TO_8, REPLACE_8_TO_9, REPLACE_9_TO_1,
     
-    # Grounded flood fill operations
-    FILL_CENTER_1, FILL_CENTER_2, FILL_CENTER_3,
-    FILL_TL_1, FILL_TR_1, FILL_BL_1, FILL_BR_1,
+    # More efficient flood fill operations
+    FILL_HOLES, FILL_BACKGROUND_0, FILL_BACKGROUND_1, FILL_BACKGROUND_2, FILL_BACKGROUND_3,
+    FLOOD_OBJECT,
     
-    # Grounded count color operations
-    COUNT_C_0, COUNT_C_1, COUNT_C_2, COUNT_C_3, COUNT_C_4,
-    COUNT_C_5, COUNT_C_6, COUNT_C_7, COUNT_C_8, COUNT_C_9
+    # COUNT_C_0, COUNT_C_1, COUNT_C_2, COUNT_C_3, COUNT_C_4,
+    # COUNT_C_5, COUNT_C_6, COUNT_C_7, COUNT_C_8, COUNT_C_9
 ]
+
+# Print summary of primitives for debugging
+def print_primitives_summary():
+    """Print a summary of the available primitives by category."""
+    categories = {
+        "Basic operations": 0,
+        "Color mask operations": 0,
+        "Tile operations": 0,
+        "Crop operations": 0,
+        "Replace color operations": 0,
+        "Flood fill operations": 0,
+        "Count color operations": 0
+    }
+    
+    for op in ALL_PRIMITIVES:
+        if op.name in ["rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", "objects", "bbox", "tile_pattern"]:
+            categories["Basic operations"] += 1
+        elif op.name.startswith("mask_c"):
+            categories["Color mask operations"] += 1
+        elif op.name.startswith("tile_"):
+            categories["Tile operations"] += 1
+        elif op.name.startswith("crop_"):
+            categories["Crop operations"] += 1
+        elif op.name.startswith("replace_"):
+            categories["Replace color operations"] += 1
+        elif op.name.startswith("fill_") or op.name.startswith("flood_"):
+            categories["Flood fill operations"] += 1
+        elif op.name.startswith("count_"):
+            categories["Count color operations"] += 1
+    
+    print(f"Using {len(ALL_PRIMITIVES)} primitives:")
+    for category, count in categories.items():
+        if count > 0:
+            print(f"  - {category}: {count}")

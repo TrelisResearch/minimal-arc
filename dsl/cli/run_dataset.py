@@ -17,7 +17,7 @@ import numpy as np
 # Add the parent directory to the path so we can import our modules
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from dsl.dsl_utils.primitives import ALL_PRIMITIVES
+from dsl.dsl_utils.primitives import ALL_PRIMITIVES, print_primitives_summary
 from dsl.dsl_utils.types import Grid
 from dsl.search.enumerator import iter_deepening
 from dsl.search.verifier import verify, evaluate_program
@@ -138,6 +138,10 @@ def main():
     parser.add_argument('--op-timeout', type=float, default=0.25, help='Timeout for individual operations in seconds (default: 0.25)')
     
     args = parser.parse_args()
+    
+    # Display welcome message with primitives summary
+    print_primitives_summary()
+    print()
     
     # Load task IDs from the JSON file
     with open(args.json_file, 'r') as f:
