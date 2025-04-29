@@ -22,25 +22,6 @@
       type: file
     - path: /io/visualizer.py
       type: file
-  - path: /tests
-    type: directory
-    contents:
-    - path: /tests/run_tests.py
-      type: file
-    - path: /tests/test_search.py
-      type: file
-    - path: /tests/test_primitives.py
-      type: file
-    - path: /tests/test_program.py
-      type: file
-    - path: /tests/test_color.py
-      type: file
-    - path: /tests/test_solution_loading.py
-      type: file
-    - path: /tests/debug_flood_fill.py
-      type: file
-    - path: /tests/test_dataset_runner.py
-      type: file
   - path: /__init__.py
     type: file
   - path: /utils
