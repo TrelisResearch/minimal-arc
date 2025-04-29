@@ -1,4 +1,4 @@
-# Greenblatt-style ARC Demo
+# LLM Guided Program Search
 
 This folder implements a Ryan-Greenblatt-style approach to solving Abstraction and Reasoning Corpus (ARC) tasks. It uses LLMs to generate many program candidates, filters them based on training examples, and uses majority voting to determine the final output.
 
@@ -24,6 +24,7 @@ The Greenblatt approach works as follows:
 ```bash
 uv init
 uv add httpx openai pydantic-ai-slim numpy matplotlib tqdm orjson ujson mcp
+uv sync # if git cloning
 ```
 
 2. Create a `.env` file with your OpenRouter API key:

@@ -39,5 +39,6 @@ uv run python clean_arc_data.py
 
 - `arc-data`: Original ARC data files
 - `arc-data-cleaned`: Cleaned ARC data files
-- `greenblatt`: The Ryan Greenblatt approach of generating many python programs and then testing them.
+- `llmgs`: LLM guided search (get an LLM to keep writing programs until one passes on train examples)
 - `ttt`: Test-time training.
+- `dsl`: Domain Specific Language approach.

@@ -98,7 +98,7 @@ TODO: implement strict equality + early bail-out on first failure
 
 PY
 
-cat <<'PY' > greenblatt/viz/show_grids.py """ show_grids.py – quick matplotlib visualizer Usage: python -m greenblatt.viz.show_grids path/to/task.json Draws: input(s), expected output(s), candidate LLM output """
+cat <<'PY' > greenblatt/viz/show_grids.py """ show_grids.py – quick matplotlib visualizer Usage: python -m llmgs.viz.show_grids path/to/task.json Draws: input(s), expected output(s), candidate LLM output """
 
 TODO: use plt.imshow & custom ListedColormap
 
@@ -154,12 +154,12 @@ out = await mcp.execute_python_code(
         timeout=2.0)
 Command-line usage examples
 # Single task demo
-python -m greenblatt.cli.main \
+python -m llmgs.cli.main \
    --task-id 00576224 \
    --k 300 --batch-size 5 --concurrency 4
 
 # Evaluate a whole subset
-python -m greenblatt.cli.main \
+python -m llmgs.cli.main \
    --task-file arc-data-cleaned/mit-easy.json \
    --k 400 --batch-size 5 --concurrency 8 \
    --save-results results_mit_easy.json

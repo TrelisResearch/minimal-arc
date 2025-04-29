@@ -1,6 +1,6 @@
 """show_grids.py – quick matplotlib visualizer
 
-Usage: python -m greenblatt.viz.show_grids path/to/task.json
+Usage: python -m llmgs.viz.show_grids path/to/task.json
 
 Draws: input(s), expected output(s), candidate LLM output
 """
