@@ -142,9 +142,9 @@ def hash_grid(grid: Grid) -> bytes:
     return shape_bytes + data_bytes
 
 
-def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: float = 0.25) -> List[Optional[bytes]]:
+def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: float = 0.25) -> List[bytes]:
     """
-    Compute hashes for all grid states after applying the program to training inputs.
+    Compute hashes for all grid states after applying a program to training inputs.
     
     Args:
         program: The program to apply
@@ -152,40 +152,44 @@ def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: 
         op_timeout: Timeout for individual operations in seconds
         
     Returns:
-        List of hashes for each output grid, or None if execution failed
+        List of hashes for the output grids
     """
     hashes = []
+    
     for input_grid in train_inputs:
         try:
-            # Run the program on the input
-            output_grid = program.run(input_grid, op_timeout=op_timeout)
-            if output_grid is not None:
-                hashes.append(hash_grid(output_grid))
-            else:
-                hashes.append(None)
-        except Exception:
-            hashes.append(None)
+            with time_limit(op_timeout):
+                output_grid = program.run(input_grid, op_timeout=op_timeout)
+                if output_grid is not None:
+                    hashes.append(hash_grid(output_grid))
+                else:
+                    # If the program fails to run, use a placeholder hash
+                    hashes.append(b'failed')
+        except (TimeoutException, Exception):
+            # If there's a timeout or any other error, use a placeholder hash
+            hashes.append(b'failed')
+    
     return hashes
 
 
 def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
-                       input_shape: Optional[Tuple[int, int]] = None,
-                       output_shape: Optional[Tuple[int, int]] = None,
-                       train_inputs: Optional[List[Grid]] = None,
-                       visited: Optional[Dict[Tuple[bytes, ...], int]] = None,
-                       op_timeout: float = 0.25,
-                       stats: Optional[Dict[str, int]] = None):
+                     input_shape: Optional[Tuple[int, int]] = None,
+                     output_shape: Optional[Tuple[int, int]] = None,
+                     train_inputs: Optional[List[Grid]] = None,
+                     visited: Optional[Dict[Tuple[bytes, ...], int]] = None,
+                     op_timeout: float = 0.25,
+                     stats: Optional[Dict[str, int]] = None):
     """
     Enumerate all valid programs with the given prefix and remaining depth.
     
     Args:
-        primitives: The list of available primitives
-        prefix: The current sequence of operations
-        remaining: The remaining depth
-        input_shape: The shape of the input grid (optional)
-        output_shape: The shape of the expected output grid (optional)
+        primitives: List of primitives to use
+        prefix: Current program prefix
+        remaining: Remaining depth
+        input_shape: Shape of the input grid (optional)
+        output_shape: Shape of the output grid (optional)
         train_inputs: List of training input grids (optional)
-        visited: Dictionary mapping grid state hashes to minimum program lengths (optional)
+        visited: Dictionary of visited grid states (optional)
         op_timeout: Timeout for individual operations in seconds
         stats: Dictionary to track statistics (optional)
         
@@ -194,59 +198,45 @@ def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
     """
     if stats is None:
         stats = {"pruned": 0, "total": 0}
-        
+    
+    # Base case: if no remaining depth, just return the prefix as a program
     if remaining == 0:
-        program = Program(prefix)
-        # Use is_compatible instead of types_ok
-        if input_shape and output_shape:
-            if program.is_compatible(Grid_T, Grid_T):
-                yield program
-        else:
-            # If no shapes are provided, just check if the program has compatible types internally
-            if len(prefix) <= 1 or all(prefix[i].out_type == prefix[i+1].in_type for i in range(len(prefix)-1)):
-                yield program
+        yield Program(prefix)
         return
     
+    # Try each primitive as the next operation
     for op in primitives:
-        # Count total candidates
-        stats["total"] += 1
-        
-        # Type signature check
-        if not type_flow_ok(prefix, op):
-            continue
-        
-        # Simple redundancy check
-        if breaks_symmetry(prefix, op):
-            continue
-        
-        # Shape-based heuristic (if shapes are provided)
+        # Skip operations that are unlikely to be useful based on shape
         if input_shape and output_shape and not shape_heuristic(prefix, op, input_shape, output_shape):
             continue
         
-        # Create the new program with this operation added
+        # Create a new prefix with this operation
         new_prefix = prefix + [op]
         
-        # Check for duplicate grid states if we have training inputs
+        # Create a program with the new prefix
+        program = Program(new_prefix)
+        
+        # Check if the program is compatible with the expected types
+        if not program.is_compatible(Grid_T, Grid_T):
+            continue
+        
+        # If we have training inputs, check if this program produces unique grid states
         if train_inputs and visited is not None:
-            # First check if the program has compatible types
-            program = Program(new_prefix)
-            if not program.is_compatible(Grid_T, Grid_T):
-                continue
-                
-            # Compute grid hashes for all training inputs
+            current_length = len(new_prefix)
+            
             try:
+                # Compute grid state hashes for this program
                 grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
-                
-                # Skip if any execution failed
-                if None in grid_hashes:
-                    continue
-                
-                # Create a tuple of hashes for all training inputs
                 hash_tuple = tuple(grid_hashes)
                 
+                # Skip if any execution failed
+                if None in grid_hashes or b'failed' in grid_hashes:
+                    continue
+                
                 # Check if we've seen this grid state before with a shorter or equal program
-                current_length = len(new_prefix)
-                if hash_tuple in visited and visited[hash_tuple] <= current_length:
+                if hash_tuple in visited and visited[hash_tuple] < current_length:
+                    # Only prune if we've seen this state with a SHORTER program
+                    # This is less aggressive than the previous approach
                     stats["pruned"] += 1
                     continue
                 
@@ -277,19 +267,20 @@ def get_optimal_process_count():
     return optimal_count
 
 
-def _search_worker(primitives, depth, input_shape, output_shape, start_idx, chunk_size, train_inputs=None, op_timeout=0.25):
+def _search_worker(primitives, depth, input_shape, output_shape, start_idx, chunk_size, train_inputs=None, op_timeout=0.25, timeout=60.0):
     """
     Worker function for parallel search.
     
     Args:
-        primitives: The list of available primitives
+        primitives: List of primitives to use
         depth: The search depth
-        input_shape: The shape of the input grid
-        output_shape: The shape of the expected output grid
+        input_shape: Shape of the input grid
+        output_shape: Shape of the expected output grid
         start_idx: The starting index in the primitives list
         chunk_size: The number of primitives to process
         train_inputs: List of training input grids (optional)
         op_timeout: Timeout for individual operations in seconds
+        timeout: Overall timeout for this worker in seconds
         
     Returns:
         A tuple of (list of valid programs, statistics)
@@ -302,40 +293,85 @@ def _search_worker(primitives, depth, input_shape, output_shape, start_idx, chun
     visited = {} if train_inputs else None
     stats = {"pruned": 0, "total": 0}
     
+    # Set end time for timeout
+    start_time = time.time()
+    end_time = start_time + timeout
+    
     for op in chunk_primitives:
-        # Skip operations that are unlikely to be useful based on shape
+        # Check if we've exceeded the timeout
+        if time.time() > end_time:
+            break
+            
+        # Count this primitive as a candidate
+        stats["total"] += 1
+        
+        # Type signature check
+        if not type_flow_ok([], op):
+            continue
+        
+        # Simple redundancy check
+        if breaks_symmetry([], op):
+            continue
+        
+        # Shape-based heuristic (if shapes are provided)
         if input_shape and output_shape and not shape_heuristic([], op, input_shape, output_shape):
             continue
         
-        # For depth 1, just check if the operation is compatible
+        # Create the new program with this operation added
+        new_prefix = [op]
+        
+        # Check for duplicate grid states if we have training inputs
+        if train_inputs and visited is not None:
+            # First check if the program has compatible types
+            program = Program(new_prefix)
+            if not program.is_compatible(Grid_T, Grid_T):
+                continue
+                
+            # Compute grid hashes for all training inputs
+            try:
+                # Compute grid state hashes for this program
+                grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
+                
+                # Skip if any execution failed
+                if None in grid_hashes or b'failed' in grid_hashes:
+                    continue
+                
+                # Create a tuple of hashes for all training inputs
+                hash_tuple = tuple(grid_hashes)
+                
+                # Check if we've seen this grid state before with a shorter program
+                current_length = len(new_prefix)
+                if hash_tuple in visited and visited[hash_tuple] < current_length:
+                    # Only prune if we've seen this state with a SHORTER program
+                    stats["pruned"] += 1
+                    continue
+                
+                # Otherwise, record this grid state
+                visited[hash_tuple] = current_length
+            except Exception:
+                # If there's any error, just continue with the next operation
+                continue
+        
+        # For depth 1, just add the program
         if depth == 1:
             program = Program([op])
             if program.is_compatible(Grid_T, Grid_T):
                 results.append(program)
-                
-                # If we have training inputs, check if this program produces unique grid states
-                if train_inputs and visited is not None:
-                    try:
-                        # Compute grid state hashes for this program
-                        grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
-                        hash_tuple = tuple(grid_hashes)
-                        
-                        # Check if we've seen this grid state before
-                        if hash_tuple in visited:
-                            stats["pruned"] += 1
-                            stats["total"] += 1
-                            continue
-                        
-                        # Otherwise, record this grid state
-                        visited[hash_tuple] = 1
-                        stats["total"] += 1
-                    except Exception:
-                        # If there's any error, just continue
-                        pass
         else:
             # For deeper searches, recursively enumerate programs
-            for program in enumerate_programs(primitives, [op], depth - 1, input_shape, output_shape, train_inputs, visited, op_timeout, stats):
-                results.append(program)
+            try:
+                with time_limit(timeout - (time.time() - start_time)):
+                    # Collect all programs from the recursive enumeration
+                    sub_stats = {"pruned": 0, "total": 0}
+                    for program in enumerate_programs(primitives, [op], depth - 1, input_shape, output_shape, train_inputs, visited, op_timeout, sub_stats):
+                        results.append(program)
+                    
+                    # Add the sub-statistics to our overall statistics
+                    stats["pruned"] += sub_stats["pruned"]
+                    stats["total"] += sub_stats["total"]
+            except TimeoutException:
+                # If we timeout, just break and return what we have so far
+                break
     
     return results, stats
 
@@ -345,18 +381,20 @@ def parallel_search(primitives: List[Op], depth: int,
                    output_shape: Tuple[int, int],
                    num_processes: Optional[int] = None,
                    train_inputs: Optional[List[Grid]] = None,
-                   op_timeout: float = 0.25):
+                   op_timeout: float = 0.25,
+                   timeout: float = 60.0):
     """
     Perform parallel search for programs of the given depth.
     
     Args:
-        primitives: The list of available primitives
+        primitives: List of primitives to use
         depth: The search depth
-        input_shape: The shape of the input grid
-        output_shape: The shape of the expected output grid
+        input_shape: Shape of the input grid
+        output_shape: Shape of the output grid
         num_processes: The number of processes to use (optional)
         train_inputs: List of training input grids (optional)
         op_timeout: Timeout for individual operations in seconds
+        timeout: Overall timeout for the search in seconds
         
     Returns:
         A list of valid programs
@@ -373,24 +411,27 @@ def parallel_search(primitives: List[Op], depth: int,
         # Create the worker function with fixed arguments
         worker_fn = partial(_search_worker, primitives, depth, input_shape, output_shape)
         
+        # Allocate timeout per worker
+        worker_timeout = timeout / 2  # Use half the timeout to ensure we don't exceed the overall timeout
+        
         # Map the worker function to the chunks
-        chunk_args = [(start_idx, chunk_size, train_inputs, op_timeout) for start_idx in start_indices]
-        results = pool.starmap(worker_fn, chunk_args)
+        chunk_args = [(start_idx, chunk_size, train_inputs, op_timeout, worker_timeout) for start_idx in start_indices]
+        
+        # Use a timeout for the whole pool operation
+        results = []
+        try:
+            with time_limit(timeout):
+                results = pool.starmap(worker_fn, chunk_args)
+        except TimeoutException:
+            print(f"Parallel search timed out after {timeout} seconds")
+            pool.terminate()
+            pool.join()
         
         # Flatten the results and collect stats
         all_programs = []
-        total_pruned = 0
-        total_candidates = 0
         
-        for chunk_result, stats in results:
+        for chunk_result, _ in results:
             all_programs.extend(chunk_result)
-            total_pruned += stats.get("pruned", 0)
-            total_candidates += stats.get("total", 0)
-        
-        # Print statistics if available
-        if train_inputs and total_candidates > 0:
-            prune_percentage = (total_pruned / max(1, total_candidates)) * 100
-            print(f"Parallel search: Pruned {total_pruned} of {total_candidates} candidates ({prune_percentage:.2f}%)")
         
         return all_programs
 
@@ -402,7 +443,8 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                   parallel: bool = False,
                   num_processes: Optional[int] = None,
                   train_inputs: Optional[List[Grid]] = None,
-                  op_timeout: float = 0.25) -> Iterator[Tuple[Program, Dict[str, Any]]]:
+                  op_timeout: float = 0.25,
+                  visited: Optional[Dict[Tuple[bytes, ...], int]] = None) -> Iterator[Tuple[Program, Dict[str, Any]]]:
     """
     Iterative deepening search for programs.
     
@@ -416,6 +458,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
         num_processes: Number of processes to use for parallel search (optional)
         train_inputs: List of training input grids (optional)
         op_timeout: Timeout for individual operations in seconds
+        visited: Dictionary to track visited grid states (optional)
         
     Yields:
         Tuples of (Program, metadata) where metadata contains search status information
@@ -423,7 +466,8 @@ def iter_deepening(primitives: List[Op], max_depth: int,
     start_time = time.time()
     
     # Dictionary to track visited grid states
-    visited = {} if train_inputs else None
+    if visited is None:
+        visited = {} if train_inputs else None
     
     # Dictionary to track statistics
     stats = {"pruned": 0, "total": 0}
@@ -446,7 +490,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                 if parallel and depth > 1:
                     # Use parallel search for depths > 1
                     # Note: We can't use visited with parallel search without additional synchronization
-                    programs = parallel_search(primitives, depth, input_shape, output_shape, num_processes, train_inputs, op_timeout)
+                    programs = parallel_search(primitives, depth, input_shape, output_shape, num_processes, train_inputs, op_timeout, timeout)
                     if not programs and train_inputs:
                         # If no programs were found and we're using memoization, we've exhausted the search space
                         search_exhausted = True
@@ -474,10 +518,13 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                 stats["pruned"] += depth_stats["pruned"]
                 stats["total"] += depth_stats["total"]
                 
-                # Print statistics for this depth
-                if train_inputs and visited:
-                    prune_percentage = (depth_stats["pruned"] / max(1, depth_stats["total"])) * 100
-                    print(f"Depth {depth}: Pruned {depth_stats['pruned']} of {depth_stats['total']} candidates ({prune_percentage:.2f}%) in {depth_duration:.2f}s")
+                # Print statistics for this depth - only if debug is enabled
+                if train_inputs and visited and False:  # Disable depth-level statistics
+                    if depth_stats["total"] > 0:
+                        prune_percentage = (depth_stats["pruned"] / depth_stats["total"]) * 100
+                        print(f"Depth {depth}: Pruned {depth_stats['pruned']} of {depth_stats['total']} candidates ({prune_percentage:.2f}%) in {depth_duration:.2f}s")
+                    else:
+                        print(f"Depth {depth}: No candidates processed in {depth_duration:.2f}s")
                     print(f"Visited states: {len(visited)}")
             
             # If we've completed all depths, the search space is exhausted
@@ -492,8 +539,11 @@ def iter_deepening(primitives: List[Op], max_depth: int,
     # Print final statistics
     if train_inputs and visited:
         total_duration = time.time() - start_time
-        prune_percentage = (stats["pruned"] / max(1, stats["total"])) * 100
-        print(f"Total: Pruned {stats['pruned']} of {stats['total']} candidates ({prune_percentage:.2f}%) in {total_duration:.2f}s")
+        if stats["total"] > 0:
+            prune_percentage = (stats["pruned"] / stats["total"]) * 100
+            print(f"Total: Pruned {stats['pruned']} of {stats['total']} candidates ({prune_percentage:.2f}%) in {total_duration:.2f}s")
+        else:
+            print(f"Total: No candidates processed in {total_duration:.2f}s")
         print(f"Total visited states: {len(visited)}")
     
     # Signal to the caller that the search space was exhausted or timed out

@@ -16,6 +16,21 @@ from dsl.search.enumerator import iter_deepening
 from dsl.search.verifier import verify
 from dsl.dsl_utils.primitives import ALL_PRIMITIVES
 
+# Define a context manager for timing out operations
+class TimeoutException(Exception):
+    pass
+
+class time_limit:
+    def __init__(self, limit):
+        self.limit = limit
+
+    def __enter__(self):
+        self.start_time = time.time()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if time.time() - self.start_time > self.limit:
+            raise TimeoutException("Operation timed out")
+
 
 def worker_process(
     job_queue: mp.Queue,
@@ -89,9 +104,15 @@ def worker_process(
             search_exhausted = False
             search_timed_out = False
             
+            # Only use the first training input for memoization to reduce memory usage
+            # Create a fresh visited dictionary for each task to prevent contamination
+            first_input = [train_pairs[0][0]] if train_pairs else None
+            
             # Generate and verify programs
             try:
-                for result in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout):
+                visited = {}  # Create a fresh visited dictionary for each task
+                for result in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
+                                           parallel=False, train_inputs=first_input, op_timeout=op_timeout, visited=visited):
                     program, metadata = result
                     
                     # Check if this is a status update rather than a program
@@ -113,17 +134,23 @@ def worker_process(
                         break
                         
                     try:
-                        if verify(program, train_pairs, op_timeout=op_timeout):
-                            valid_program = program
-                            found_solution = True
-                            
-                            # Generate prediction for the test input
-                            try:
-                                prediction = program.run(test_input, op_timeout=op_timeout)
-                            except Exception:
-                                prediction = None
-                            
-                            break
+                        with time_limit(op_timeout * 2):  # Give verification a bit more time
+                            if verify(program, train_pairs, op_timeout=op_timeout):
+                                valid_program = program
+                                found_solution = True
+                                
+                                # Generate prediction for the test input
+                                try:
+                                    with time_limit(op_timeout * 2):  # Give prediction a bit more time
+                                        prediction = program.run(test_input, op_timeout=op_timeout)
+                                except TimeoutException:
+                                    prediction = None
+                                except Exception:
+                                    prediction = None
+                                
+                                break
+                    except TimeoutException:
+                        continue
                     except Exception:
                         continue
             except TimeoutException:

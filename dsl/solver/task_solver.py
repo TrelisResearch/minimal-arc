@@ -89,8 +89,12 @@ def solve_task(
     
     # Generate and verify programs
     try:
+        # Create a fresh visited dictionary for this task
+        visited = {}
+        
         iterator = iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
-                                parallel, num_processes, train_inputs, op_timeout)
+                                parallel, num_processes, train_inputs=train_pairs[0][0:1], op_timeout=op_timeout,
+                                visited=visited)
         
         while True:
             try:
