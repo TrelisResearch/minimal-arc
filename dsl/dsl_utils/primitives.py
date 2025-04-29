@@ -446,6 +446,44 @@ def hole_mask(g):
     return Grid(holes)
 
 
+# Replace lambda functions with named functions for pickling compatibility
+
+def mask_c1_fn(g):
+    """Create a binary mask for color 1."""
+    return color_mask_fn(g, 1)
+
+def mask_c2_fn(g):
+    """Create a binary mask for color 2."""
+    return color_mask_fn(g, 2)
+
+def mask_c3_fn(g):
+    """Create a binary mask for color 3."""
+    return color_mask_fn(g, 3)
+
+def tile_3x3_fn(g):
+    """Tile the grid 3x3."""
+    return tile_fn(g, 3, 3)
+
+def tile_2x2_fn(g):
+    """Tile the grid 2x2."""
+    return tile_fn(g, 2, 2)
+
+def crop_center_half_fn(g):
+    """Crop the center half of the grid."""
+    return crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2)
+
+def crop_center_third_fn(g):
+    """Crop the center third of the grid."""
+    return crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3)
+
+def replace_0_to_1_fn(g):
+    """Replace color 0 with color 1."""
+    return replace_color_fn(g, 0, 1)
+
+def replace_1_to_2_fn(g):
+    """Replace color 1 with color 2."""
+    return replace_color_fn(g, 1, 2)
+
 # Define the basic operations
 ROT90 = Op("rot90", rot90_fn, Grid_T, Grid_T)
 ROT180 = Op("rot180", rot180_fn, Grid_T, Grid_T, commutes_with={"rot180"})
@@ -470,22 +508,22 @@ SHIFT_DOWN_PAD = Op("shift_down_pad", shift_down_pad, Grid_T, Grid_T)
 HOLE_MASK = Op("hole_mask", hole_mask, Grid_T, Grid_T)
 
 # Color mask operations
-MASK_C_1 = Op("mask_c1", lambda g: color_mask_fn(g, 1), Grid_T, Grid_T)
-MASK_C_2 = Op("mask_c2", lambda g: color_mask_fn(g, 2), Grid_T, Grid_T)
-MASK_C_3 = Op("mask_c3", lambda g: color_mask_fn(g, 3), Grid_T, Grid_T)
+MASK_C_1 = Op("mask_c1", mask_c1_fn, Grid_T, Grid_T)
+MASK_C_2 = Op("mask_c2", mask_c2_fn, Grid_T, Grid_T)
+MASK_C_3 = Op("mask_c3", mask_c3_fn, Grid_T, Grid_T)
 
 # Tile operations
 TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
-TILE_3x3 = Op("tile_3x3", lambda g: tile_fn(g, 3, 3), Grid_T, Grid_T)
-TILE_2x2 = Op("tile_2x2", lambda g: tile_fn(g, 2, 2), Grid_T, Grid_T)
+TILE_3x3 = Op("tile_3x3", tile_3x3_fn, Grid_T, Grid_T)
+TILE_2x2 = Op("tile_2x2", tile_2x2_fn, Grid_T, Grid_T)
 
 # Crop operations
-CROP_CENTER_HALF = Op("crop_center_half", lambda g: crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2), Grid_T, Grid_T)
-CROP_CENTER_THIRD = Op("crop_center_third", lambda g: crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3), Grid_T, Grid_T)
+CROP_CENTER_HALF = Op("crop_center_half", crop_center_half_fn, Grid_T, Grid_T)
+CROP_CENTER_THIRD = Op("crop_center_third", crop_center_third_fn, Grid_T, Grid_T)
 
 # Replace color operations
-REPLACE_0_TO_1 = Op("replace_0_to_1", lambda g: replace_color_fn(g, 0, 1), Grid_T, Grid_T)
-REPLACE_1_TO_2 = Op("replace_1_to_2", lambda g: replace_color_fn(g, 1, 2), Grid_T, Grid_T)
+REPLACE_0_TO_1 = Op("replace_0_to_1", replace_0_to_1_fn, Grid_T, Grid_T)
+REPLACE_1_TO_2 = Op("replace_1_to_2", replace_1_to_2_fn, Grid_T, Grid_T)
 
 # Flood fill operations
 FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)

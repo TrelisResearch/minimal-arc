@@ -4,7 +4,7 @@
     "solved": true,
     "correct": true,
     "program": "Program(tile_2x2, rot180, crop_center_half)",
-    "elapsed_time": 0.08524680137634277,
+    "elapsed_time": 0.10629701614379883,
     "search_exhausted": false,
     "search_timed_out": false
   },
@@ -13,16 +13,16 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 3.693427324295044,
+    "elapsed_time": 6.011060953140259,
     "search_exhausted": true,
     "search_timed_out": false
   },
   {
-    "task_id": "963f59bc",
+    "task_id": "f3cdc58f",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 6.769467115402222,
+    "elapsed_time": 7.342403888702393,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -31,25 +31,16 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 0.0005648136138916016,
+    "elapsed_time": 0.0007202625274658203,
     "search_exhausted": false,
     "search_timed_out": false
   },
   {
-    "task_id": "f3cdc58f",
+    "task_id": "963f59bc",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 7.4317591190338135,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "692cd3b6",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 8.362863779067993,
+    "elapsed_time": 8.334810018539429,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -58,7 +49,16 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 9.53019905090332,
+    "elapsed_time": 9.124157905578613,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "692cd3b6",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 10.776066064834595,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -67,25 +67,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 13.013818979263306,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "7ee1c6ea",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 7.068774938583374,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "e9ac8c9e",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 6.316953182220459,
+    "elapsed_time": 13.40383791923523,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -94,16 +76,25 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 11.513545036315918,
+    "elapsed_time": 11.806384086608887,
     "search_exhausted": true,
     "search_timed_out": false
   },
   {
-    "task_id": "a04b2602",
+    "task_id": "7ee1c6ea",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 14.994852066040039,
+    "elapsed_time": 10.506181955337524,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "e9ac8c9e",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 8.380339860916138,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -112,16 +103,16 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 3.589428186416626,
+    "elapsed_time": 4.484262943267822,
     "search_exhausted": true,
     "search_timed_out": false
   },
   {
-    "task_id": "1da012fc",
+    "task_id": "a04b2602",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 24.496891021728516,
+    "elapsed_time": 18.394893169403076,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -130,16 +121,43 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 23.125763177871704,
+    "elapsed_time": 21.645970821380615,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "1da012fc",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 34.75895714759827,
     "search_exhausted": true,
     "search_timed_out": false
   },
   {
     "task_id": "1a2e2828",
+    "solved": true,
+    "correct": true,
+    "program": "Program(crop_center_third, crop_center_third, shift_up_pad, replace_0_to_1)",
+    "elapsed_time": 14.494375228881836,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "3194b014",
+    "solved": true,
+    "correct": true,
+    "program": "Program(crop_center_half, crop_center_third, mask_c1, replace_0_to_1)",
+    "elapsed_time": 52.00044107437134,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "358ba94e",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 20.3690927028656,
+    "elapsed_time": 55.92790913581848,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -148,25 +166,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 58.17001819610596,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "358ba94e",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 63.58670401573181,
-    "search_exhausted": true,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "3194b014",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 63.596181869506836,
+    "elapsed_time": 60.896626234054565,
     "search_exhausted": true,
     "search_timed_out": false
   },
@@ -175,7 +175,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 117.79762697219849,
+    "elapsed_time": 112.66530084609985,
     "search_exhausted": true,
     "search_timed_out": false
   }

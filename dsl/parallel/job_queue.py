@@ -186,15 +186,39 @@ def worker_process(
                 if solution_data.ndim > 2 and solution_data.shape[0] == 1:
                     solution_data = solution_data[0]
                 
-                # Compare the actual grid data
-                correct = np.array_equal(prediction_data, solution_data)
+                # Check if shapes match
+                if prediction_data.shape != solution_data.shape:
+                    if debug:
+                        print(f"Task {task_id}: Shape mismatch - Prediction: {prediction_data.shape}, Solution: {solution_data.shape}")
+                    correct = False
+                else:
+                    # Import color normalization functions
+                    from dsl.utils.color import normalise_palette, denormalise
+                    
+                    # Normalize both prediction and solution for comparison
+                    norm_pred, pred_mapping = normalise_palette(prediction_data)
+                    norm_sol, sol_mapping = normalise_palette(solution_data)
+                    
+                    # Compare the normalized grids
+                    correct = np.array_equal(norm_pred, norm_sol)
+                    
+                    # If not correct with normalization, try direct comparison as fallback
+                    if not correct:
+                        correct = np.array_equal(prediction_data, solution_data)
                 
                 if debug:
                     print(f"Task {task_id}: Prediction {'matches' if correct else 'does not match'} solution")
                     if not correct:
-                        print(f"Prediction shape: {prediction.shape}, Solution shape: {solution.shape}")
+                        print(f"Prediction shape: {prediction_data.shape}, Solution shape: {solution_data.shape}")
                         print(f"Prediction data: {prediction_data.tolist()}")
                         print(f"Solution data: {solution_data.tolist()}")
+                        
+                        # Show normalized versions for debugging
+                        if prediction_data.shape == solution_data.shape:
+                            norm_pred, _ = normalise_palette(prediction_data)
+                            norm_sol, _ = normalise_palette(solution_data)
+                            print(f"Normalized prediction: {norm_pred.tolist()}")
+                            print(f"Normalized solution: {norm_sol.tolist()}")
             elif debug:
                 if solution is None:
                     print(f"Task {task_id}: No solution available for comparison")
