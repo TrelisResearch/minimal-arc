@@ -178,14 +178,60 @@ def main():
             task = task_loader(task_id)
             prediction = None
             
-            if result['solved'] and 'prediction' in result:
-                prediction = result['prediction']
+            if result['solved']:
+                # We need to get the actual prediction object, not just the string representation
+                # First, try to get it directly from the result
+                if 'prediction_data' in result and result['prediction_data'] is not None:
+                    prediction = result['prediction_data']
+                else:
+                    # If not available, we need to re-run the program to get the prediction
+                    try:
+                        from dsl.dsl_utils.program import Program
+                        from dsl.dsl_utils.primitives import ALL_PRIMITIVES
+                        
+                        # Parse the program string back into a Program object
+                        program_str = result['program']
+                        if program_str:
+                            # Extract operation names from the program string
+                            op_names = program_str.strip('Program(').strip(')').split(', ')
+                            
+                            # Find the corresponding operations
+                            ops = []
+                            for op_name in op_names:
+                                for op in ALL_PRIMITIVES:
+                                    if op.name == op_name:
+                                        ops.append(op)
+                                        break
+                            
+                            if ops:
+                                # Recreate the program
+                                program = Program(ops)
+                                
+                                # Get the test input
+                                test_input = test_input_loader(task)
+                                
+                                # Run the program to get the prediction
+                                prediction = program.run(test_input, op_timeout=args.op_timeout)
+                    except Exception as e:
+                        print(f"Warning: Could not recreate prediction: {e}")
             
             if prediction is not None:
                 plt.figure(figsize=(12, 8))
-                visualize_task(task, prediction)
+                from dsl.io.visualizer import visualize_task
+                
+                # Convert Grid object to numpy array if needed
+                from dsl.dsl_utils.types import Grid
+                if isinstance(prediction, Grid):
+                    prediction_data = prediction.data
+                else:
+                    prediction_data = prediction
+                    
+                fig = visualize_task(task, prediction_data)
                 plt.tight_layout()
-                plt.show()
+                plt.show(block=True)  # Make sure to block until the window is closed
+                print("Visualization displayed. Close the window to continue.")
+            else:
+                print("No prediction available to visualize.")
     else:
         # Dataset mode - show summary statistics and per-task results
         solved_count = sum(1 for result in results if result['solved'])
