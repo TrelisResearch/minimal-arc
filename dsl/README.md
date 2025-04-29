@@ -18,45 +18,41 @@ uv add numpy matplotlib tqdm pydantic
 uv sync # if cloning the repo
 
 # Run on a single task
-uv run cli/run_task.py 66e6c45b --depth 4 --show --data-path ../arc-data-cleaned --timeout 60 --debug
+uv run cli/run_arc.py --task-id 66e6c45b --depth 4 --show --data-path ../arc-data-cleaned --timeout 60 --debug
 
 # Run on a dataset
-uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 60 --save-dir results --data-path ../arc-data-cleaned
+uv run cli/run_arc.py --dataset-file ../arc-data/mit-easy.json --depth 4 --timeout 60 --save-dir results --data-path ../arc-data-cleaned
 ```
 
 ## Command Line Options
 
-### Running a Single Task
+### Unified Command Line Interface
 
 ```bash
-uv run cli/run_task.py <task_id> [options]
+uv run cli/run_arc.py [options]
 ```
 
-Options:
+Required (choose one):
+- `--task-id TASK_ID`: Run on a single task
+- `--dataset-file PATH`: Run on multiple tasks from a JSON file
+
+Common options:
 - `--depth INT`: Maximum search depth (default: 4)
-- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
-- `--show`: Show visualization
-- `--save PATH`: Save visualization to file
-- `--data-path PATH`: Path to the data directory
-- `--parallel`: Use parallel search (default: True)
-- `--num-processes INT`: Number of processes to use (default: CPU count - 1) # that's cpu count minus one.
+- `--timeout FLOAT`: Search timeout in seconds (default: 60.0)
 - `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
+- `--data-path PATH`: Path to the data directory
+- `--save-dir PATH`: Directory to save results and visualizations
 - `--debug`: Print debug information
 
-### Running a Dataset
+Visualization options (choose one):
+- `--show`: Show visualization (for single task only)
+- `--save-viz`: Save visualizations to save-dir
 
-```bash
-uv run cli/run_dataset.py <json_file> [options]
-```
-
-Options:
-- `--depth INT`: Maximum search depth (default: 4)
-- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
+Parallel processing:
 - `--parallel INT`: Number of parallel processes (default: CPU count - 1)
-- `--data-path PATH`: Path to the data directory
-- `--save-dir PATH`: Directory to save results
-- `--results-file PATH`: File to save results (default: results.json)
-- `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
+
+Dataset-specific options:
+- `--results-file PATH`: File to save results (for dataset mode)
 
 ## How It Works
 
@@ -161,8 +157,7 @@ By reducing the number of primitives from ~80 to ~40, we achieve approximately a
   - `loader.py`: Load tasks from JSON files
   - `visualizer.py`: Visualize grids and results
 - `cli/`: Command-line interfaces
-  - `run_task.py`: Run solver on a single task
-  - `run_dataset.py`: Run solver on multiple tasks
+  - `run_arc.py`: Unified CLI for running solver on single tasks or datasets
 - `examples/`: Example notebooks
   - `01_demo.ipynb`: Demonstration of the solver
 
