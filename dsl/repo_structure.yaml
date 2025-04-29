@@ -1,3 +1,10 @@
+  - path: /parallel
+    type: directory
+    contents:
+    - path: /parallel/__init__.py
+      type: file
+    - path: /parallel/job_queue.py
+      type: file
   - path: /requirements.txt
     type: file
   - path: /uv.lock
@@ -26,10 +33,23 @@
       type: file
     - path: /tests/test_program.py
       type: file
+    - path: /tests/test_color.py
+      type: file
+    - path: /tests/test_solution_loading.py
+      type: file
     - path: /tests/debug_flood_fill.py
+      type: file
+    - path: /tests/test_dataset_runner.py
       type: file
   - path: /__init__.py
     type: file
+  - path: /utils
+    type: directory
+    contents:
+    - path: /utils/color.py
+      type: file
+    - path: /utils/__init__.py
+      type: file
   - path: /solver
     type: directory
     contents:
@@ -57,15 +77,12 @@
       type: file
     - path: /search/enumerator.py
       type: file
+    - path: /search/grid_signature.py
+      type: file
     - path: /search/verifier.py
       type: file
   - path: /README.md
     type: file
-  - path: /results
-    type: directory
-    contents:
-    - path: /results/results.json
-      type: file
   - path: /test_tile_pattern.py
     type: file
   - path: /dsl_utils

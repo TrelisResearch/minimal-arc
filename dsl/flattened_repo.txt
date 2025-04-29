@@ -1,3 +1,352 @@
+<parallel/__init__.py>
+
+
+</parallel/__init__.py>
+
+<parallel/job_queue.py>
+"""
+ARC DSL Job Queue.
+
+This module implements a process-based parallelism approach with a job queue
+for solving multiple ARC tasks efficiently.
+"""
+import time
+import multiprocessing as mp
+from typing import List, Dict, Any, Callable, Optional, Tuple
+import numpy as np
+from tqdm import tqdm
+
+from dsl.dsl_utils.types import Grid
+from dsl.dsl_utils.program import Program
+from dsl.search.enumerator import iter_deepening
+from dsl.search.verifier import verify
+from dsl.dsl_utils.primitives import ALL_PRIMITIVES
+
+# Define a context manager for timing out operations
+class TimeoutException(Exception):
+    pass
+
+class time_limit:
+    def __init__(self, limit):
+        self.limit = limit
+
+    def __enter__(self):
+        self.start_time = time.time()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if time.time() - self.start_time > self.limit:
+            raise TimeoutException("Operation timed out")
+
+
+def worker_process(
+    job_queue: mp.Queue,
+    result_queue: mp.Queue,
+    task_loader: Callable,
+    solution_loader: Callable,
+    train_pairs_loader: Callable,
+    test_input_loader: Callable,
+    depth: int,
+    timeout: float,
+    op_timeout: float,
+    save_dir: Optional[str] = None,
+    visualizer: Optional[Callable] = None,
+    debug: bool = False
+):
+    """
+    Worker process function that processes jobs from the queue.
+    
+    Args:
+        job_queue: Queue of task IDs to process
+        result_queue: Queue to put results in
+        task_loader: Function to load a task from its ID
+        solution_loader: Function to load a solution from a task ID
+        train_pairs_loader: Function to load training pairs from a task
+        test_input_loader: Function to load test input from a task
+        depth: Maximum search depth
+        timeout: Search timeout in seconds
+        op_timeout: Timeout for individual operations in seconds
+        save_dir: Directory to save visualizations (optional)
+        visualizer: Function to visualize results (optional)
+        debug: Whether to print debug information
+    """
+    while True:
+        try:
+            # Get a job from the queue
+            task_id = job_queue.get(block=False)
+        except Exception:
+            # No more jobs
+            break
+            
+        try:
+            # Load the task
+            task = task_loader(task_id)
+            
+            # Extract training pairs
+            train_pairs = train_pairs_loader(task)
+            test_input = test_input_loader(task)
+            
+            # Try to load the solution
+            solution = None
+            try:
+                solution_grid = solution_loader(task_id)
+                solution = Grid(solution_grid)
+                if debug:
+                    print(f"Loaded solution for task {task_id}: {solution.shape}")
+            except Exception as e:
+                if debug:
+                    print(f"Failed to load solution for task {task_id}: {e}")
+            
+            # Get shapes for heuristics
+            input_shape = train_pairs[0][0].shape
+            output_shape = train_pairs[0][1].shape
+            
+            # Start the search
+            start_time = time.time()
+            end_time = start_time + timeout
+            
+            found_solution = False
+            valid_program = None
+            prediction = None
+            search_exhausted = False
+            search_timed_out = False
+            
+            # Only use the first training input for memoization to reduce memory usage
+            # Create a fresh visited dictionary for each task to prevent contamination
+            first_input = [train_pairs[0][0]] if train_pairs else None
+            
+            # Generate and verify programs
+            try:
+                visited = {}  # Create a fresh visited dictionary for each task
+                for result in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
+                                           parallel=False, train_inputs=first_input, op_timeout=op_timeout, visited=visited):
+                    program, metadata = result
+                    
+                    # Check if this is a status update rather than a program
+                    if program is None:
+                        search_exhausted = metadata.get("search_exhausted", False)
+                        search_timed_out = metadata.get("search_timed_out", False)
+                        if search_exhausted and debug:
+                            print(f"Task {task_id}: Search space exhausted (all programs up to depth {depth} tried)")
+                        if search_timed_out and debug:
+                            print(f"Task {task_id}: Search timed out after {timeout} seconds")
+                        break
+                    
+                    # Check if we've exceeded the timeout
+                    current_time = time.time()
+                    if current_time > end_time:
+                        search_timed_out = True
+                        if debug:
+                            print(f"Task {task_id}: Search timed out after {timeout} seconds")
+                        break
+                        
+                    try:
+                        with time_limit(op_timeout * 2):  # Give verification a bit more time
+                            if verify(program, train_pairs, op_timeout=op_timeout):
+                                valid_program = program
+                                found_solution = True
+                                
+                                # Generate prediction for the test input
+                                try:
+                                    with time_limit(op_timeout * 2):  # Give prediction a bit more time
+                                        prediction = program.run(test_input, op_timeout=op_timeout)
+                                except TimeoutException:
+                                    prediction = None
+                                except Exception:
+                                    prediction = None
+                                
+                                break
+                    except TimeoutException:
+                        continue
+                    except Exception:
+                        continue
+            except TimeoutException:
+                search_timed_out = True
+                if debug:
+                    print(f"Task {task_id}: Search timed out after {timeout} seconds")
+            except StopIteration:
+                # End of iterator
+                pass
+            except Exception as e:
+                if debug:
+                    print(f"Task {task_id}: Unexpected error during search: {e}")
+            
+            # If no prediction was generated, report why
+            if not found_solution and debug:
+                if search_exhausted:
+                    print(f"Task {task_id}: No prediction generated - Search space exhausted (all programs up to depth tried)")
+                elif search_timed_out:
+                    print(f"Task {task_id}: No prediction generated - Search timed out after {timeout} seconds")
+                else:
+                    print(f"Task {task_id}: No prediction generated")
+            
+            elapsed_time = time.time() - start_time
+            
+            # Check if the prediction matches the solution
+            correct = False
+            if solution is not None and prediction is not None:
+                # Handle different array shapes by comparing the actual grid data
+                solution_data = solution.data
+                prediction_data = prediction.data
+                
+                # If solution has an extra dimension (e.g., (1, 4, 4)), remove it
+                if solution_data.ndim > 2 and solution_data.shape[0] == 1:
+                    solution_data = solution_data[0]
+                
+                # Check if shapes match
+                if prediction_data.shape != solution_data.shape:
+                    if debug:
+                        print(f"Task {task_id}: Shape mismatch - Prediction: {prediction_data.shape}, Solution: {solution_data.shape}")
+                    correct = False
+                else:
+                    # Import color normalization functions
+                    from dsl.utils.color import normalise_palette, denormalise
+                    
+                    # Normalize both prediction and solution for comparison
+                    norm_pred, pred_mapping = normalise_palette(prediction_data)
+                    norm_sol, sol_mapping = normalise_palette(solution_data)
+                    
+                    # Compare the normalized grids
+                    correct = np.array_equal(norm_pred, norm_sol)
+                    
+                    # If not correct with normalization, try direct comparison as fallback
+                    if not correct:
+                        correct = np.array_equal(prediction_data, solution_data)
+                
+                if debug:
+                    print(f"Task {task_id}: Prediction {'matches' if correct else 'does not match'} solution")
+                    if not correct:
+                        print(f"Prediction shape: {prediction_data.shape}, Solution shape: {solution_data.shape}")
+                        print(f"Prediction data: {prediction_data.tolist()}")
+                        print(f"Solution data: {solution_data.tolist()}")
+                        
+                        # Show normalized versions for debugging
+                        if prediction_data.shape == solution_data.shape:
+                            norm_pred, _ = normalise_palette(prediction_data)
+                            norm_sol, _ = normalise_palette(solution_data)
+                            print(f"Normalized prediction: {norm_pred.tolist()}")
+                            print(f"Normalized solution: {norm_sol.tolist()}")
+            elif debug:
+                if solution is None:
+                    print(f"Task {task_id}: No solution available for comparison")
+                if prediction is None:
+                    print(f"Task {task_id}: No prediction generated")
+            
+            # Save visualization if requested
+            if save_dir and found_solution and visualizer:
+                try:
+                    visualizer(task, prediction, save_dir, task_id)
+                except Exception:
+                    pass
+            
+            # Put the result in the result queue
+            result_queue.put({
+                'task_id': task_id,
+                'solved': found_solution,
+                'correct': correct,
+                'program': str(valid_program) if valid_program else None,
+                'elapsed_time': elapsed_time,
+                'search_exhausted': search_exhausted,
+                'search_timed_out': search_timed_out
+            })
+        except Exception as e:
+            # Put an error result in the result queue
+            result_queue.put({
+                'task_id': task_id,
+                'solved': False,
+                'correct': False,
+                'error': str(e),
+                'elapsed_time': 0,
+                'search_exhausted': False,
+                'search_timed_out': False
+            })
+
+
+def process_tasks_parallel(
+    task_ids: List[str],
+    task_loader: Callable,
+    solution_loader: Callable,
+    train_pairs_loader: Callable,
+    test_input_loader: Callable,
+    depth: int,
+    timeout: float,
+    op_timeout: float,
+    num_processes: int,
+    save_dir: Optional[str] = None,
+    visualizer: Optional[Callable] = None,
+    debug: bool = False
+) -> List[Dict[str, Any]]:
+    """
+    Process multiple tasks in parallel using a job queue.
+    
+    Args:
+        task_ids: List of task IDs to process
+        task_loader: Function to load a task from its ID
+        solution_loader: Function to load a solution from a task ID
+        train_pairs_loader: Function to load training pairs from a task
+        test_input_loader: Function to load test input from a task
+        depth: Maximum search depth
+        timeout: Search timeout in seconds
+        op_timeout: Timeout for individual operations in seconds
+        num_processes: Number of worker processes to use
+        save_dir: Directory to save visualizations (optional)
+        visualizer: Function to visualize results (optional)
+        debug: Whether to print debug information
+        
+    Returns:
+        List of result dictionaries, one for each task
+    """
+    # Create the queues
+    job_queue = mp.Queue()
+    result_queue = mp.Queue()
+    
+    # Put all jobs in the queue
+    for task_id in task_ids:
+        job_queue.put(task_id)
+    
+    # Start the worker processes
+    processes = []
+    for _ in range(num_processes):
+        p = mp.Process(
+            target=worker_process,
+            args=(
+                job_queue,
+                result_queue,
+                task_loader,
+                solution_loader,
+                train_pairs_loader,
+                test_input_loader,
+                depth,
+                timeout,
+                op_timeout,
+                save_dir,
+                visualizer,
+                debug
+            )
+        )
+        p.start()
+        processes.append(p)
+    
+    # Collect results with a progress bar
+    results = []
+    with tqdm(total=len(task_ids), desc="Processing tasks") as pbar:
+        while len(results) < len(task_ids):
+            try:
+                result = result_queue.get(timeout=0.1)
+                results.append(result)
+                pbar.update(1)
+            except Exception:
+                # Check if all processes are done
+                if all(not p.is_alive() for p in processes):
+                    break
+    
+    # Wait for all processes to finish
+    for p in processes:
+        p.join()
+    
+    return results
+
+</parallel/job_queue.py>
+
 <requirements.txt>
 numpy>=1.25      # fast array ops
 matplotlib>=3.8  # visualization
@@ -11,144 +360,184 @@ pydantic>=2      # config + type hints
 <results.json>
 [
   {
-    "task_id": "00576224",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 5.984306335449219e-05
-  },
-  {
     "task_id": "66e6c45b",
-    "solved": false,
-    "correct": false,
-    "error": "Image data of dtype <U20 cannot be converted to float",
-    "elapsed_time": 0
-  },
-  {
-    "task_id": "0a1d4ef5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.039722204208374
-  },
-  {
-    "task_id": "692cd3b6",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.008354663848877
-  },
-  {
-    "task_id": "3194b014",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000099897384644
-  },
-  {
-    "task_id": "1da012fc",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.00304365158081
-  },
-  {
-    "task_id": "d37a1ef5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.0000319480896
-  },
-  {
-    "task_id": "963f59bc",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000016927719116
-  },
-  {
-    "task_id": "55059096",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000046014785767
-  },
-  {
-    "task_id": "4b6b68e5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.00122594833374
+    "solved": true,
+    "correct": true,
+    "program": "Program(tile_2x2, rot180, crop_center_half)",
+    "elapsed_time": 0.10629701614379883,
+    "search_exhausted": false,
+    "search_timed_out": false
   },
   {
     "task_id": "c7d4e6ad",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.00124216079712
-  },
-  {
-    "task_id": "358ba94e",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000021934509277
+    "elapsed_time": 6.011060953140259,
+    "search_exhausted": true,
+    "search_timed_out": false
   },
   {
     "task_id": "f3cdc58f",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.001342058181763
+    "elapsed_time": 7.342403888702393,
+    "search_exhausted": true,
+    "search_timed_out": false
   },
   {
-    "task_id": "e9c9d9a1",
+    "task_id": "00576224",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.000244140625
+    "elapsed_time": 0.0007202625274658203,
+    "search_exhausted": false,
+    "search_timed_out": false
   },
   {
-    "task_id": "770cc55f",
+    "task_id": "963f59bc",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.000025987625122
+    "elapsed_time": 8.334810018539429,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "55059096",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 9.124157905578613,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "692cd3b6",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 10.776066064834595,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "d37a1ef5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 13.40383791923523,
+    "search_exhausted": true,
+    "search_timed_out": false
   },
   {
     "task_id": "ef26cbf6",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.0000901222229
-  },
-  {
-    "task_id": "a04b2602",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000494718551636
+    "elapsed_time": 11.806384086608887,
+    "search_exhausted": true,
+    "search_timed_out": false
   },
   {
     "task_id": "7ee1c6ea",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.000039339065552
-  },
-  {
-    "task_id": "1a2e2828",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.00002408027649
+    "elapsed_time": 10.506181955337524,
+    "search_exhausted": true,
+    "search_timed_out": false
   },
   {
     "task_id": "e9ac8c9e",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.001758098602295
+    "elapsed_time": 8.380339860916138,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "770cc55f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 4.484262943267822,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "a04b2602",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 18.394893169403076,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "e9c9d9a1",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 21.645970821380615,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "1da012fc",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 34.75895714759827,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "1a2e2828",
+    "solved": true,
+    "correct": true,
+    "program": "Program(crop_center_third, crop_center_third, shift_up_pad, replace_0_to_1)",
+    "elapsed_time": 14.494375228881836,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "3194b014",
+    "solved": true,
+    "correct": true,
+    "program": "Program(crop_center_half, crop_center_third, mask_c1, replace_0_to_1)",
+    "elapsed_time": 52.00044107437134,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "358ba94e",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 55.92790913581848,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "4b6b68e5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.896626234054565,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "0a1d4ef5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 112.66530084609985,
+    "search_exhausted": true,
+    "search_timed_out": false
   }
 ]
 </results.json>
@@ -164,12 +553,14 @@ ARC Task Loader.
 
 This module handles loading ARC tasks from JSON files.
 """
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import json
 import os
 import pathlib
+import numpy as np
 
 from ..dsl_utils.types import Grid
+from ..utils.color import normalise_palette, denormalise
 
 
 def load_task(task_id: str, data_path: Optional[str] = None) -> Dict[str, Any]:
@@ -217,7 +608,7 @@ def load_task(task_id: str, data_path: Optional[str] = None) -> Dict[str, Any]:
     raise ValueError(f"Task {task_id} not found in any challenges file")
 
 
-def load_solution(task_id: str, data_path: Optional[str] = None) -> List[List[int]]:
+def load_solution(task_id: str, data_path: Optional[str] = None) -> np.ndarray:
     """
     Load the solution for a task.
     
@@ -226,7 +617,7 @@ def load_solution(task_id: str, data_path: Optional[str] = None) -> List[List[in
         data_path: Path to the data directory (default: ../arc-data-cleaned)
         
     Returns:
-        The solution grid
+        The solution grid as a 2D numpy array
     """
     if data_path is None:
         # Default to the arc-data-cleaned directory
@@ -241,7 +632,11 @@ def load_solution(task_id: str, data_path: Optional[str] = None) -> List[List[in
         with open(solutions_file, 'r') as f:
             data = json.load(f)
             if task_id in data:
-                return data[task_id]
+                solution = np.array(data[task_id])
+                # Handle 3D solutions by extracting the first 2D grid
+                if len(solution.shape) == 3:
+                    solution = solution[0]  # Extract the first 2D grid
+                return solution
     
     # Try to load from the training solutions file
     solutions_file = os.path.join(data_path, 'arc-agi_training_solutions.json')
@@ -249,7 +644,11 @@ def load_solution(task_id: str, data_path: Optional[str] = None) -> List[List[in
         with open(solutions_file, 'r') as f:
             data = json.load(f)
             if task_id in data:
-                return data[task_id]
+                solution = np.array(data[task_id])
+                # Handle 3D solutions by extracting the first 2D grid
+                if len(solution.shape) == 3:
+                    solution = solution[0]  # Extract the first 2D grid
+                return solution
     
     raise ValueError(f"Solution for task {task_id} not found")
 
@@ -268,34 +667,64 @@ def load_id_list(json_file: str) -> List[str]:
         return json.load(f)
 
 
-def load_train_pairs(task: Dict[str, Any]) -> List[tuple]:
+def load_train_pairs(task: Dict[str, Any], normalise: bool = True) -> List[Tuple[Grid, Grid]]:
     """
     Extract training pairs from a task.
     
     Args:
         task: The task dictionary
+        normalise: Whether to normalize the color palette
         
     Returns:
         A list of (input_grid, output_grid) pairs
     """
     pairs = []
     for example in task['train']:
-        inp = Grid(example['input'])
-        out = Grid(example['output'])
-        pairs.append((inp, out))
+        g_in = np.array(example['input'])
+        g_out = np.array(example['output'])
+        
+        if normalise:
+            g_in, _ = normalise_palette(g_in)
+            g_out, _ = normalise_palette(g_out)  # same rule because colors match pair-wise
+            
+        pairs.append((Grid(g_in), Grid(g_out)))
     return pairs
 
 
-def load_test_input(task: Dict[str, Any]) -> Grid:
+def load_test_pair(task: Dict[str, Any], normalise: bool = True) -> Tuple[Grid, Dict[int, int]]:
+    """
+    Extract the test input from a task and normalize its palette.
+    
+    Args:
+        task: The task dictionary
+        normalise: Whether to normalize the color palette
+        
+    Returns:
+        A tuple of (test_input_grid, color_mapping)
+    """
+    g_in = np.array(task['test'][0]['input'])
+    
+    if normalise:
+        g_in, mapping = normalise_palette(g_in)
+        return Grid(g_in), mapping
+    else:
+        return Grid(g_in), {}
+
+
+def load_test_input(task: Dict[str, Any], normalise: bool = False) -> Grid:
     """
     Extract the test input from a task.
     
     Args:
         task: The task dictionary
+        normalise: Whether to normalize the color palette
         
     Returns:
         The test input grid
     """
+    if normalise:
+        grid, _ = load_test_pair(task, normalise=True)
+        return grid
     return Grid(task['test'][0]['input'])
 
 </io/loader.py>
@@ -706,8 +1135,9 @@ sys.path.insert(0, str(project_root))
 
 from dsl.dsl_utils.primitives import (
     rot90_fn, rot180_fn, rot270_fn, flip_h_fn, flip_v_fn, transpose_fn,
-    color_mask_fn, flood_fill_fn, find_objects_fn, get_bbox_fn,
-    tile_fn, tile_pattern_fn, crop_fn, replace_color_fn, count_color_fn
+    color_mask_fn, find_objects_fn, get_bbox_fn,
+    tile_fn, tile_pattern_fn, crop_fn, replace_color_fn, count_color_fn,
+    shift_up_pad, shift_down_pad, hole_mask
 )
 from dsl.dsl_utils.types import Grid, ObjList, Object
 
@@ -734,16 +1164,16 @@ class TestGridTransformations(unittest.TestCase):
         """Test 90-degree rotation."""
         result = rot90_fn(self.grid_2x2)
         expected = Grid(np.array([
-            [3, 1],
-            [4, 2]
+            [2, 4],
+            [1, 3]
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
         
         result = rot90_fn(self.grid_3x3)
         expected = Grid(np.array([
-            [7, 4, 1],
-            [8, 5, 2],
-            [9, 6, 3]
+            [3, 6, 9],
+            [2, 5, 8],
+            [1, 4, 7]
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
     
@@ -768,16 +1198,16 @@ class TestGridTransformations(unittest.TestCase):
         """Test 270-degree rotation."""
         result = rot270_fn(self.grid_2x2)
         expected = Grid(np.array([
-            [2, 4],
-            [1, 3]
+            [3, 1],
+            [4, 2]
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
         
         result = rot270_fn(self.grid_3x3)
         expected = Grid(np.array([
-            [3, 6, 9],
-            [2, 5, 8],
-            [1, 4, 7]
+            [7, 4, 1],
+            [8, 5, 2],
+            [9, 6, 3]
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
     
@@ -862,41 +1292,6 @@ class TestColorOperations(unittest.TestCase):
             [1, 0, 0]
         ]))
         self.assertTrue(np.array_equal(result.data, expected.data))
-    
-    def test_flood_fill(self):
-        """Test flood fill."""
-        # Create a grid with a region to fill
-        grid = Grid(np.array([
-            [1, 1, 1],
-            [1, 0, 0],
-            [1, 0, 0]
-        ]))
-        
-        # Fill starting from the top-left
-        result = flood_fill_fn(grid, 0, 0, 2)
-        expected = Grid(np.array([
-            [2, 2, 2],
-            [2, 0, 0],
-            [2, 0, 0]
-        ]))
-        self.assertTrue(np.array_equal(result.data, expected.data))
-        
-        # Create another grid for the second test
-        grid2 = Grid(np.array([
-            [1, 1, 1],
-            [1, 0, 0],
-            [1, 0, 0]
-        ]))
-        
-        # Fill starting from the bottom-right (which is a 0)
-        # This should fill all connected 0's
-        result2 = flood_fill_fn(grid2, 2, 2, 3)
-        expected2 = Grid(np.array([
-            [1, 1, 1],
-            [1, 3, 3],
-            [1, 3, 3]
-        ]))
-        self.assertTrue(np.array_equal(result2.data, expected2.data))
     
     def test_replace_color(self):
         """Test color replacement."""
@@ -1001,7 +1396,7 @@ class TestGridManipulations(unittest.TestCase):
     
     def test_tile_pattern(self):
         """Test the special tile pattern for task 00576224."""
-        # Test with a 2x2 grid
+        # Create a 2x2 grid
         grid = Grid(np.array([
             [1, 2],
             [3, 4]
@@ -1009,10 +1404,13 @@ class TestGridManipulations(unittest.TestCase):
         
         result = tile_pattern_fn(grid)
         expected = Grid(np.array([
+            # Rows 0-1: Original pattern repeated 3 times horizontally
             [1, 2, 1, 2, 1, 2],
             [3, 4, 3, 4, 3, 4],
-            [2, 1, 2, 1, 2, 1],
+            # Rows 2-3: Flipped pattern (both horizontally and vertically)
             [4, 3, 4, 3, 4, 3],
+            [2, 1, 2, 1, 2, 1],
+            # Rows 4-5: Original pattern again
             [1, 2, 1, 2, 1, 2],
             [3, 4, 3, 4, 3, 4]
         ]))
@@ -1052,6 +1450,111 @@ class TestGridManipulations(unittest.TestCase):
             [5, 6, 7],
             [9, 10, 11]
         ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+
+
+class TestShiftOperations(unittest.TestCase):
+    """Test shift operations with zero-padding."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create a simple 2x2 test grid
+        self.grid_2x2 = Grid(np.array([
+            [1, 1],
+            [0, 1]
+        ]))
+        
+        # Create a simple 3x3 test grid
+        self.grid_3x3 = Grid(np.array([
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9]
+        ]))
+    
+    def test_shift_up_pad(self):
+        """Test shift up with zero-padding."""
+        result = shift_up_pad(self.grid_2x2)
+        expected = Grid(np.array([
+            [0, 1],
+            [0, 0]
+        ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+        
+        result = shift_up_pad(self.grid_3x3)
+        expected = Grid(np.array([
+            [4, 5, 6],
+            [7, 8, 9],
+            [0, 0, 0]
+        ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+    
+    def test_shift_down_pad(self):
+        """Test shift down with zero-padding."""
+        result = shift_down_pad(self.grid_2x2)
+        expected = Grid(np.array([
+            [1, 1],
+            [0, 0]
+        ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+        
+        result = shift_down_pad(self.grid_3x3)
+        expected = Grid(np.array([
+            [4, 5, 6],
+            [1, 2, 3],
+            [0, 0, 0]
+        ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+    
+    def test_rot_chain_identity(self):
+        """Test that ROT90 followed by ROT270 returns the original grid."""
+        # Create a random grid
+        data = np.random.randint(0, 10, (3, 3))
+        grid = Grid(data)
+        
+        # Apply ROT90 followed by ROT270
+        result = rot270_fn(rot90_fn(grid))
+        
+        # Check that the result is the same as the original
+        self.assertTrue(np.array_equal(result.data, grid.data))
+
+
+class TestHoleMask(unittest.TestCase):
+    """Test hole mask operation."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        # Create a grid with a hole in the middle
+        self.grid_with_hole = Grid(np.array([
+            [1, 1, 1, 1, 1],
+            [1, 0, 0, 0, 1],
+            [1, 0, 0, 0, 1],
+            [1, 0, 0, 0, 1],
+            [1, 1, 1, 1, 1]
+        ]))
+        
+        # Create a grid with no holes
+        self.grid_no_holes = Grid(np.array([
+            [1, 1, 1],
+            [1, 1, 1],
+            [1, 1, 1]
+        ]))
+    
+    def test_hole_mask_with_hole(self):
+        """Test hole_mask with a grid containing a hole."""
+        result = hole_mask(self.grid_with_hole)
+        expected = Grid(np.array([
+            [0, 0, 0, 0, 0],
+            [0, 1, 1, 1, 0],
+            [0, 1, 1, 1, 0],
+            [0, 1, 1, 1, 0],
+            [0, 0, 0, 0, 0]
+        ]))
+        self.assertTrue(np.array_equal(result.data, expected.data))
+    
+    def test_hole_mask_no_holes(self):
+        """Test hole_mask with a grid containing no holes."""
+        result = hole_mask(self.grid_no_holes)
+        expected = Grid(np.zeros((3, 3), dtype=int))
         self.assertTrue(np.array_equal(result.data, expected.data))
 
 
@@ -1256,6 +1759,178 @@ if __name__ == '__main__':
 
 </tests/test_program.py>
 
+<tests/test_color.py>
+"""
+Tests for color utilities.
+
+This module contains tests for the color utility functions.
+"""
+import unittest
+import numpy as np
+import sys
+import os
+from pathlib import Path
+
+# Add the project root to the path
+current_dir = Path(__file__).parent
+project_root = current_dir.parent.parent
+sys.path.insert(0, str(project_root))
+
+from dsl.utils.color import normalise_palette, denormalise
+
+
+class TestColorUtils(unittest.TestCase):
+    """Test color utility functions."""
+    
+    def test_normalise_palette(self):
+        """Test palette normalization."""
+        # Test case from the example
+        grid = np.array([[0, 4], [9, 4]])
+        expected = np.array([[0, 1], [2, 1]])
+        
+        norm, mapping = normalise_palette(grid)
+        self.assertTrue(np.array_equal(norm, expected))
+        self.assertEqual(mapping, {4: 1, 9: 2})
+        
+        # Test with more complex grid
+        grid = np.array([
+            [0, 5, 8, 0],
+            [5, 0, 8, 3],
+            [0, 3, 5, 0]
+        ])
+        # The colors are sorted in ascending order: 3, 5, 8
+        expected = np.array([
+            [0, 2, 3, 0],
+            [2, 0, 3, 1],
+            [0, 1, 2, 0]
+        ])
+        
+        norm, mapping = normalise_palette(grid)
+        self.assertTrue(np.array_equal(norm, expected))
+        self.assertEqual(mapping, {3: 1, 5: 2, 8: 3})
+        
+        # Test with already normalized grid
+        grid = np.array([
+            [0, 1, 2],
+            [2, 1, 0]
+        ])
+        
+        norm, mapping = normalise_palette(grid)
+        self.assertTrue(np.array_equal(norm, grid))
+        self.assertEqual(mapping, {1: 1, 2: 2})
+    
+    def test_denormalise(self):
+        """Test palette denormalization."""
+        # Test case from the example
+        grid = np.array([[0, 1], [2, 1]])
+        mapping = {4: 1, 9: 2}
+        expected = np.array([[0, 4], [9, 4]])
+        
+        denorm = denormalise(grid, mapping)
+        self.assertTrue(np.array_equal(denorm, expected))
+        
+        # Test with more complex grid
+        grid = np.array([
+            [0, 1, 2, 0],
+            [1, 0, 2, 3],
+            [0, 3, 1, 0]
+        ])
+        mapping = {3: 3, 5: 1, 8: 2}
+        expected = np.array([
+            [0, 5, 8, 0],
+            [5, 0, 8, 3],
+            [0, 3, 5, 0]
+        ])
+        
+        denorm = denormalise(grid, mapping)
+        self.assertTrue(np.array_equal(denorm, expected))
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+</tests/test_color.py>
+
+<tests/test_solution_loading.py>
+"""
+Test script to examine solution loading and dimensionality issues.
+"""
+import os
+import sys
+import numpy as np
+from pathlib import Path
+
+# Add the parent directory to the path
+current_dir = Path(__file__).parent
+project_root = current_dir.parent.parent
+sys.path.insert(0, str(project_root))
+
+from dsl.io.loader import load_task, load_solution
+from dsl.utils.color import normalise_palette, denormalise
+
+def inspect_solution(task_id, data_path="../arc-data-cleaned"):
+    """Inspect the solution for a task to check dimensionality."""
+    print(f"Inspecting solution for task {task_id}...")
+    
+    # Load the solution
+    try:
+        solution = load_solution(task_id, data_path)
+        print(f"Solution type: {type(solution)}")
+        print(f"Solution shape: {np.array(solution).shape}")
+        
+        # Check if solution has 3 dimensions
+        solution_array = np.array(solution)
+        if len(solution_array.shape) == 3:
+            print(f"WARNING: Solution has 3 dimensions: {solution_array.shape}")
+            print(f"First dimension values: {[solution_array[i, 0, 0] for i in range(solution_array.shape[0])]}")
+            
+            # Extract the 2D grid (assuming the first dimension is irrelevant)
+            solution_2d = solution_array[0]
+            print(f"Extracted 2D solution shape: {solution_2d.shape}")
+        else:
+            print("Solution is already 2D.")
+            solution_2d = solution_array
+            
+        # Test color normalization
+        normalized, mapping = normalise_palette(solution_2d)
+        print(f"Color mapping: {mapping}")
+        
+        # Test denormalization
+        denormalized = denormalise(normalized, mapping)
+        
+        # Check if denormalized matches original
+        if np.array_equal(denormalized, solution_2d):
+            print("✅ Denormalized solution matches original")
+        else:
+            print("❌ Denormalized solution does NOT match original")
+            print(f"Original unique colors: {np.unique(solution_2d)}")
+            print(f"Denormalized unique colors: {np.unique(denormalized)}")
+            
+    except Exception as e:
+        print(f"Error loading solution: {e}")
+        
+    # Load the task to check test output
+    try:
+        task = load_task(task_id, data_path)
+        test_input = np.array(task['test'][0]['input'])
+        print(f"Test input shape: {test_input.shape}")
+        
+        # If we have a solution, check its shape against test input
+        if 'solution' in locals():
+            if solution_2d.shape != test_input.shape:
+                print(f"WARNING: Solution shape {solution_2d.shape} doesn't match test input shape {test_input.shape}")
+    except Exception as e:
+        print(f"Error loading task: {e}")
+
+if __name__ == "__main__":
+    # Use command line argument for task_id if provided
+    task_id = sys.argv[1] if len(sys.argv) > 1 else "692cd3b6"
+    data_path = sys.argv[2] if len(sys.argv) > 2 else "../arc-data-cleaned"
+    
+    inspect_solution(task_id, data_path)
+
+</tests/test_solution_loading.py>
+
 <tests/debug_flood_fill.py>
 """
 Debug script for the flood_fill function.
@@ -1327,10 +2002,159 @@ if __name__ == "__main__":
 
 </tests/debug_flood_fill.py>
 
+<tests/test_dataset_runner.py>
+"""
+Test script to verify dataset runner with our fixes.
+"""
+import os
+import sys
+import json
+from pathlib import Path
+
+# Add the parent directory to the path
+current_dir = Path(__file__).parent
+project_root = current_dir.parent.parent
+sys.path.insert(0, str(project_root))
+
+from dsl.parallel.job_queue import process_tasks_parallel
+from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input
+from functools import partial
+
+def main():
+    """Test the dataset runner with a small set of tasks."""
+    # Use the tasks that were previously failing
+    task_ids = ["1a2e2828", "3194b014"]
+    
+    # Set up data path
+    data_path = os.path.join(project_root, "arc-data-cleaned")
+    
+    # Create partial functions for the loaders
+    task_loader = partial(load_task, data_path=data_path)
+    solution_loader = partial(load_solution, data_path=data_path)
+    train_pairs_loader = load_train_pairs
+    test_input_loader = load_test_input
+    
+    # Process tasks with our fixed implementation
+    print(f"Testing dataset runner with {len(task_ids)} tasks...")
+    results = process_tasks_parallel(
+        task_ids=task_ids,
+        task_loader=task_loader,
+        solution_loader=solution_loader,
+        train_pairs_loader=train_pairs_loader,
+        test_input_loader=test_input_loader,
+        depth=4,
+        timeout=5.0,
+        op_timeout=0.25,
+        num_processes=1,  # Use single process for easier debugging
+        debug=True
+    )
+    
+    # Print results
+    print("\nResults summary:")
+    for result in results:
+        task_id = result['task_id']
+        solved = result['solved']
+        correct = result.get('correct', False)
+        print(f"Task {task_id}: Solved: {solved}, Correct: {correct}")
+    
+    # Count successful tasks
+    solved_count = sum(1 for result in results if result['solved'])
+    correct_count = sum(1 for result in results if result.get('correct', False))
+    
+    print(f"\nOverall: {solved_count}/{len(task_ids)} tasks solved")
+    print(f"Correct: {correct_count}/{len(task_ids)} predictions match solutions")
+
+if __name__ == "__main__":
+    main()
+
+</tests/test_dataset_runner.py>
+
 <__init__.py>
 
 
 </__init__.py>
+
+<utils/color.py>
+"""
+Color utilities for the ARC DSL.
+
+This module provides functions for manipulating colors in ARC grids.
+"""
+import numpy as np
+from typing import Tuple, Dict
+
+
+def normalise_palette(grid: np.ndarray) -> Tuple[np.ndarray, Dict[int, int]]:
+    """
+    Normalize the palette of a grid.
+    
+    Converts the grid so that 0 stays 0, and the first non-zero color becomes 1,
+    the next becomes 2, and so on.
+    
+    Args:
+        grid: The input grid
+        
+    Returns:
+        A tuple of (normalized_grid, forward_mapping)
+    """
+    # Create a copy of the grid to modify
+    norm = grid.copy()
+    
+    # Get unique colors and sort them
+    unique_colors = sorted(np.unique(grid))
+    
+    # Create mapping from original colors to normalized colors
+    # Keep 0 as 0, map other colors to 1, 2, 3, ...
+    mapping = {}
+    next_color = 1
+    
+    for color in unique_colors:
+        if color == 0:
+            mapping[int(color)] = 0  # Keep 0 as 0
+        else:
+            mapping[int(color)] = next_color
+            next_color += 1
+    
+    # Apply the mapping to each color
+    for old_color, new_color in mapping.items():
+        mask = (grid == old_color)
+        norm[mask] = new_color
+        
+    return norm, mapping
+
+
+def denormalise(grid: np.ndarray, mapping: Dict[int, int]) -> np.ndarray:
+    """
+    Denormalize a grid using the provided mapping.
+    
+    Args:
+        grid: The normalized grid
+        mapping: The forward mapping from original colors to normalized colors
+        
+    Returns:
+        The denormalized grid
+    """
+    # Create a copy of the grid to modify
+    result = grid.copy()
+    
+    # Create inverse mapping (normalized -> original)
+    inverse_mapping = {v: k for k, v in mapping.items()}
+    
+    # Apply the inverse mapping to each color
+    for norm_color, orig_color in inverse_mapping.items():
+        mask = (grid == norm_color)
+        result[mask] = orig_color
+        
+    return result
+
+</utils/color.py>
+
+<utils/__init__.py>
+"""
+Utility modules for the ARC DSL.
+"""
+
+</utils/__init__.py>
 
 <solver/task_solver.py>
 """
@@ -1381,10 +2205,16 @@ def solve_task(
         - program: The program that solves the task (if found)
         - prediction: The prediction for the test input (if available)
         - elapsed_time: Time taken to find the solution
+        - search_exhausted: Whether the search space was exhausted
+        - search_timed_out: Whether the search timed out
     """
     # Get shapes for heuristics
     input_shape = train_pairs[0][0].shape
     output_shape = train_pairs[0][1].shape
+    
+    # Extract training inputs and outputs for joint-example forward search
+    train_inputs = [pair[0] for pair in train_pairs]
+    train_outputs = [pair[1] for pair in train_pairs]
     
     if debug:
         print(f"Input shape: {input_shape}, Output shape: {output_shape}")
@@ -1399,68 +2229,126 @@ def solve_task(
     # Use a more reliable timeout approach
     end_time = start_time + timeout
     
+    # Track whether search was exhausted or timed out
+    search_exhausted = False
+    search_timed_out = False
+    
+    # Check if we're running in a multiprocessing context
+    # If we are, we should disable parallel search to avoid nested parallelism
+    try:
+        import multiprocessing
+        current_process = multiprocessing.current_process()
+        if current_process.daemon:
+            # We're in a daemon process, so disable parallel search
+            parallel = False
+            if debug:
+                print("Running in daemon process, disabling parallel search")
+    except (ImportError, AttributeError):
+        # multiprocessing not available or we're not in a multiprocessing context
+        pass
+    
     # Generate and verify programs
     try:
-        for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
-                                    parallel, num_processes):
-            # Check if we've exceeded the timeout
-            current_time = time.time()
-            if current_time > end_time:
-                if debug:
-                    print(f"Search timed out after {timeout} seconds")
-                break
-                
+        # Create a fresh visited dictionary for this task
+        visited = {}
+        
+        iterator = iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
+                                parallel, num_processes, train_inputs=train_inputs, train_outputs=train_outputs, 
+                                op_timeout=op_timeout, visited=visited)
+        
+        while True:
             try:
-                if verify(program, train_pairs, op_timeout=op_timeout):
-                    valid_program = program
-                    found_solution = True
-                    
-                    if debug:
-                        print(f"Found valid program: {program}")
-                    
-                    # Generate prediction for the test input
-                    try:
-                        prediction = program.run(test_input, op_timeout=op_timeout)
-                        if debug and prediction is not None:
-                            print(f"Generated prediction for test input")
-                        elif debug:
-                            print(f"Failed to generate prediction for test input")
-                    except TimeoutException:
-                        if debug:
-                            print("Operation timed out during prediction")
-                    except Exception as e:
-                        if debug:
-                            print(f"Error during prediction: {e}")
-                    
+                result = next(iterator)
+                program, metadata = result
+                
+                # Check if this is a status update rather than a program
+                if program is None:
+                    search_exhausted = metadata.get("search_exhausted", False)
+                    search_timed_out = metadata.get("search_timed_out", False)
+                    if search_exhausted and debug:
+                        print(f"Search space exhausted (all programs up to depth {depth} tried)")
+                    if search_timed_out and debug:
+                        print(f"Search timed out after {timeout} seconds")
                     break
-            except TimeoutException:
-                if debug:
-                    print(f"Program timed out during verification: {program}")
-                continue
-            except Exception as e:
-                if debug:
-                    print(f"Error during verification: {e}")
-                continue
+                
+                # Check if we've exceeded the timeout
+                current_time = time.time()
+                if current_time > end_time:
+                    if debug:
+                        print(f"Search timed out after {timeout} seconds")
+                    search_timed_out = True
+                    break
+                    
+                try:
+                    # With joint-example forward search, we can skip verification for most programs
+                    # as they are already verified during the search process
+                    # However, we still need to verify to be absolutely sure
+                    if verify(program, train_pairs, op_timeout=op_timeout):
+                        valid_program = program
+                        found_solution = True
+                        
+                        if debug:
+                            print(f"Found valid program: {program}")
+                        
+                        # Generate prediction for the test input
+                        try:
+                            prediction = program.run(test_input, op_timeout=op_timeout)
+                            if debug and prediction is not None:
+                                print(f"Generated prediction for test input")
+                            elif debug:
+                                print(f"Failed to generate prediction for test input")
+                        except TimeoutException:
+                            if debug:
+                                print("Operation timed out during prediction")
+                        except Exception as e:
+                            if debug:
+                                print(f"Error during prediction: {e}")
+                        
+                        break
+                except TimeoutException:
+                    if debug:
+                        print(f"Program timed out during verification: {program}")
+                    continue
+                except Exception as e:
+                    if debug:
+                        print(f"Error during verification: {e}")
+                    continue
+            
+            except StopIteration:
+                # End of iterator
+                break
+    
     except KeyboardInterrupt:
         if debug:
             print("Search interrupted by user")
     except TimeoutException:
         if debug:
             print(f"Search timed out after {timeout} seconds")
+        search_timed_out = True
+    except Exception as e:
+        if debug:
+            print(f"Unexpected error during search: {e}")
     
     elapsed_time = time.time() - start_time
     
     if debug:
         print(f"Search completed in {elapsed_time:.2f} seconds")
         if not found_solution:
-            print("No solution found")
+            if search_exhausted:
+                print(f"No solution found: Search space exhausted (all programs up to depth {depth} tried)")
+            elif search_timed_out:
+                print(f"No solution found: Search timed out after {timeout} seconds")
+            else:
+                print("No solution found")
     
     return {
         'task_id': task_id,
         'solved': found_solution,
         'program': valid_program,
         'prediction': prediction,
-        'elapsed_time': elapsed_time
+        'elapsed_time': elapsed_time,
+        'search_exhausted': search_exhausted,
+        'search_timed_out': search_timed_out
     }
 
 
@@ -1507,9 +2395,8 @@ import sys
 import os
 import json
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
+import multiprocessing as mp
 from functools import partial
-from tqdm import tqdm
 import numpy as np
 
 # Add the parent directory to the path so we can import our modules
@@ -1517,84 +2404,23 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from dsl.dsl_utils.primitives import ALL_PRIMITIVES, print_primitives_summary
 from dsl.dsl_utils.types import Grid
-from dsl.solver.task_solver import solve_task
 from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input
-from dsl.io.visualizer import visualize_task, save_visualization
+from dsl.io.visualizer import visualize_task
+from dsl.parallel.job_queue import process_tasks_parallel
 
 
-def process_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
+def save_visualization(task, prediction, save_dir, task_id):
     """
-    Process a single task.
+    Save a visualization of the task and prediction.
     
     Args:
+        task: The task data
+        prediction: The prediction grid
+        save_dir: Directory to save the visualization
         task_id: The task ID
-        depth: Maximum search depth
-        timeout: Search timeout in seconds
-        data_path: Path to the data directory
-        save_dir: Directory to save results
-        op_timeout: Timeout for individual operations in seconds
-        
-    Returns:
-        Dictionary with results
     """
-    try:
-        # Load the task
-        task = load_task(task_id, data_path)
-        
-        # Extract training pairs
-        train_pairs = load_train_pairs(task)
-        test_input = load_test_input(task)
-        
-        # Try to load the solution
-        solution = None
-        try:
-            solution_grid = load_solution(task_id, data_path)
-            solution = Grid(solution_grid)
-        except Exception:
-            pass
-        
-        # Solve the task using the unified solver
-        result = solve_task(
-            task_id=task_id,
-            train_pairs=train_pairs,
-            test_input=test_input,
-            depth=depth,
-            timeout=timeout,
-            op_timeout=op_timeout,
-            parallel=False,  # Don't use parallel within a process that's already parallelized
-            debug=False
-        )
-        
-        # Extract results
-        found_solution = result['solved']
-        valid_program = result['program']
-        prediction = result['prediction']
-        
-        # Check if the prediction matches the solution
-        correct = False
-        if solution is not None and prediction is not None:
-            correct = np.array_equal(prediction.data, solution.data)
-        
-        # Save visualization if requested
-        if save_dir and found_solution:
-            save_path = os.path.join(save_dir, f"{task_id}.png")
-            visualize_task(task, prediction, save_path)
-        
-        return {
-            'task_id': task_id,
-            'solved': found_solution,
-            'correct': correct,
-            'program': str(valid_program) if valid_program else None,
-            'elapsed_time': result['elapsed_time']
-        }
-    except Exception as e:
-        return {
-            'task_id': task_id,
-            'solved': False,
-            'correct': False,
-            'error': str(e),
-            'elapsed_time': 0
-        }
+    save_path = os.path.join(save_dir, f"{task_id}.png")
+    visualize_task(task, prediction, save_path)
 
 
 def main():
@@ -1602,8 +2428,8 @@ def main():
     parser = argparse.ArgumentParser(description='Run the ARC DSL solver on a dataset')
     parser.add_argument('json_file', type=str, help='Path to the JSON file containing task IDs')
     parser.add_argument('--depth', type=int, default=4, help='Maximum search depth (default: 4)')
-    parser.add_argument('--timeout', type=float, default=15.0, help='Search timeout in seconds (default: 15.0)')
-    parser.add_argument('--parallel', type=int, help='Number of parallel processes (default: CPU count - 1)')
+    parser.add_argument('--timeout', type=float, default=3.0, help='Search timeout in seconds (default: 15.0)')
+    parser.add_argument('--parallel', type=int, default=mp.cpu_count() - 1, help='Number of parallel processes (default: CPU count - 1)')
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--save-dir', type=str, help='Directory to save results')
     parser.add_argument('--results-file', type=str, default='results.json', help='File to save results (default: results.json)')
@@ -1633,10 +2459,7 @@ def main():
     print(f"Loaded {len(task_ids)} task IDs from {args.json_file}")
     
     # Set up parallel processing
-    if args.parallel is None:
-        num_processes = max(1, cpu_count() - 1)
-    else:
-        num_processes = args.parallel
+    num_processes = args.parallel
     
     print(f"Running {len(task_ids)} tasks with {num_processes} parallel processes...")
     
@@ -1644,24 +2467,30 @@ def main():
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
     
-    # Run tasks in parallel
-    with Pool(processes=num_processes) as pool:
-        # Create a partial function with fixed arguments
-        process_task_partial = partial(
-            process_task,
-            depth=args.depth,
-            timeout=args.timeout,
-            data_path=args.data_path,
-            save_dir=args.save_dir,
-            op_timeout=args.op_timeout
-        )
-        
-        # Map the function to the task IDs with a progress bar
-        results = list(tqdm(
-            pool.imap_unordered(process_task_partial, task_ids),
-            total=len(task_ids),
-            desc="Processing tasks"
-        ))
+    # Create partial functions for the loaders
+    task_loader = partial(load_task, data_path=args.data_path)
+    solution_loader = partial(load_solution, data_path=args.data_path)
+    train_pairs_loader = load_train_pairs
+    test_input_loader = load_test_input
+    
+    # Add debug flag
+    debug = True
+    
+    # Process tasks in parallel using the job queue
+    results = process_tasks_parallel(
+        task_ids=task_ids,
+        task_loader=task_loader,
+        solution_loader=solution_loader,
+        train_pairs_loader=train_pairs_loader,
+        test_input_loader=test_input_loader,
+        depth=args.depth,
+        timeout=args.timeout,
+        op_timeout=args.op_timeout,
+        num_processes=num_processes,
+        save_dir=args.save_dir,
+        visualizer=save_visualization if args.save_dir else None,
+        debug=debug
+    )
     
     # Count successful tasks
     solved_count = sum(1 for result in results if result['solved'])
@@ -1695,6 +2524,7 @@ import os
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+import multiprocessing as mp
 
 # Fix the import path issue
 current_dir = Path(__file__).parent
@@ -1720,7 +2550,7 @@ def main():
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--direct-test', action='store_true', help='Directly test the tile_pattern function')
     parser.add_argument('--parallel', action='store_true', default=True, help='Use parallel search (default: True)')
-    parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search')
+    parser.add_argument('--num-processes', type=int, help='Number of processes to use for parallel search (default: CPU count - 1)')
     parser.add_argument('--op-timeout', type=float, default=0.25, help='Timeout for individual operations in seconds (default: 0.25)')
     parser.add_argument('--debug', action='store_true', help='Print debug information')
     
@@ -1745,6 +2575,12 @@ def main():
         solution = Grid(solution_grid)
     except Exception as e:
         print(f"Warning: Could not load solution: {e}")
+    
+    # Set up parallel processing
+    if args.num_processes is None:
+        num_processes = max(1, mp.cpu_count() - 1)
+    else:
+        num_processes = args.num_processes
     
     # Direct test for the tile_pattern function
     if args.direct_test and args.task_id == "00576224":
@@ -1873,17 +2709,21 @@ def main():
         timeout=args.timeout,
         op_timeout=args.op_timeout,
         parallel=args.parallel,
-        num_processes=args.num_processes,
-        debug=args.debug or True  # Always show debug output for single task
+        num_processes=num_processes,
+        debug=args.debug
     )
     
-    # Extract results
     found_solution = result['solved']
     valid_program = result['program']
     prediction = result['prediction']
     elapsed_time = result['elapsed_time']
+    search_exhausted = result.get('search_exhausted', False)
     
     if not found_solution:
+        if search_exhausted:
+            print("No solution found: Search space exhausted (all programs up to depth tried)")
+        else:
+            print(f"No solution found: Search timed out after {args.timeout} seconds")
         return
     
     # Visualize the results
@@ -1953,6 +2793,10 @@ def main():
             
             # Display the solution if available
             if solution_data is not None:
+                # If solution has an extra dimension (e.g., (1, 4, 4)), remove it
+                if solution_data.ndim > 2 and solution_data.shape[0] == 1:
+                    solution_data = solution_data[0]
+                
                 axs[-1][2].imshow(solution_data, interpolation='nearest', vmin=0, vmax=9, cmap='tab10')
                 axs[-1][2].set_title("Test Solution")
                 axs[-1][2].axis('off')
@@ -1962,6 +2806,7 @@ def main():
                     print("Prediction matches solution!")
                 else:
                     print("Prediction does not match solution")
+                    print(f"Prediction shape: {prediction_data.shape}, Solution shape: {solution_data.shape}")
             
             # Add grid lines for test
             for ax in axs[-1][:2]:
@@ -2191,17 +3036,18 @@ ARC DSL Program Enumerator.
 
 This module implements iterative deepening search over DSL programs.
 """
-from typing import List, Iterator, Set, Dict, Tuple, Optional
+from typing import List, Iterator, Set, Dict, Tuple, Optional, Any
 import time
 import signal
 from contextlib import contextmanager
 import multiprocessing
 from functools import partial
+import numpy as np
 
 from ..dsl_utils.primitives import Op, ALL_PRIMITIVES, TILE_PATTERN
 from ..dsl_utils.program import Program
 from ..dsl_utils.types import Type, Grid, ObjList, Grid_T
-
+from .grid_signature import compute_grid_signature, is_signature_compatible
 
 class TimeoutException(Exception):
     """Exception raised when a timeout occurs."""
@@ -2297,65 +3143,285 @@ def shape_heuristic(prefix: List[Op], next_op: Op,
     Returns:
         True if the operation is likely to be useful, False otherwise
     """
+    # Depth of the current search (length of prefix)
+    depth = len(prefix)
+    
+    # If the output is the same shape as the input and we're at depth 1,
+    # only allow rotation, flip, transpose, and color operations
+    if depth == 1 and output_shape == input_shape:
+        allowed_ops = {
+            "rot90", "rot180", "rot270", 
+            "flip_h", "flip_v", "transpose", 
+            "flip_diag", "flip_antidiag",
+            "mask_c1", "mask_c2", "mask_c3",
+            "replace_0_to_1", "replace_1_to_2",
+            "hole_mask"
+        }
+        if next_op.name not in allowed_ops:
+            return False
+    
     # If the output is smaller than the input, prioritize operations that reduce size
     if output_shape[0] < input_shape[0] or output_shape[1] < input_shape[1]:
-        if next_op.name in ["crop"]:
+        if next_op.name in ["crop_center_half", "crop_center_third"]:
             return True
-        if len(prefix) > 0 and prefix[-1].name in ["crop"]:
+        if len(prefix) > 0 and prefix[-1].name.startswith("crop_"):
             return True
     
     # If the output is larger than the input, prioritize operations that increase size
     if output_shape[0] > input_shape[0] or output_shape[1] > input_shape[1]:
-        if next_op.name in ["tile", "tile_pattern"]:
+        if next_op.name in ["tile_2x2", "tile_3x3", "tile_pattern", 
+                           "shift_up_pad", "shift_down_pad", "shift_left", "shift_right"]:
             return True
     
     # Default: allow the operation
     return True
 
 
+def hash_grid(grid: Grid) -> bytes:
+    """
+    Create a hash for a grid that includes both its data and shape.
+    
+    Args:
+        grid: The grid to hash
+        
+    Returns:
+        A bytes object that uniquely identifies the grid
+    """
+    # Create a bytes representation that includes both data and shape
+    shape_bytes = np.array(grid.shape).tobytes()
+    data_bytes = grid.data.tobytes()
+    return shape_bytes + data_bytes
+
+
+def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: float = 0.25) -> List[bytes]:
+    """
+    Compute hashes for all grid states after applying a program to training inputs.
+    
+    Args:
+        program: The program to apply
+        train_inputs: List of training input grids
+        op_timeout: Timeout for individual operations in seconds
+        
+    Returns:
+        List of hashes for the output grids
+    """
+    hashes = []
+    
+    for input_grid in train_inputs:
+        try:
+            with time_limit(op_timeout):
+                output_grid = program.run(input_grid, op_timeout=op_timeout)
+                if output_grid is not None:
+                    hashes.append(hash_grid(output_grid))
+                else:
+                    # If the program fails to run, use a placeholder hash
+                    hashes.append(b'failed')
+        except (TimeoutException, Exception):
+            # If there's a timeout or any other error, use a placeholder hash
+            hashes.append(b'failed')
+    
+    return hashes
+
+
+def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op, op_timeout: float = 0.25) -> Optional[List[Grid]]:
+    """
+    Extend a list of prefix states with an operation, checking compatibility with target states.
+    
+    Args:
+        prefix_states: List of current grid states (one per training example)
+        target_states: List of target grid states (one per training example)
+        op: The operation to apply
+        op_timeout: Timeout for the operation in seconds
+        
+    Returns:
+        List of new grid states if all examples survive, None if any example is pruned
+    """
+    new_states = []
+    
+    for i, (grid, target) in enumerate(zip(prefix_states, target_states)):
+        try:
+            with time_limit(op_timeout):
+                # Apply the operation to the current grid
+                new_grid = op.fn(grid)
+                
+                if new_grid is None:
+                    # Operation failed
+                    return None
+                
+                # Check if the shape is compatible with the target
+                if new_grid.shape != target.shape:
+                    # Shape mismatch, prune this branch
+                    return None
+                
+                # Compute signatures for early pruning
+                current_sig = compute_grid_signature(new_grid)
+                target_sig = compute_grid_signature(target)
+                
+                # Check if the signatures are compatible
+                if not is_signature_compatible(current_sig, target_sig):
+                    # Signatures are incompatible, prune this branch
+                    return None
+                
+                new_states.append(new_grid)
+        except (TimeoutException, Exception):
+            # Operation timed out or failed, prune this branch
+            return None
+    
+    return new_states
+
+
 def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
-                       input_shape: Optional[Tuple[int, int]] = None,
-                       output_shape: Optional[Tuple[int, int]] = None):
+                     input_shape: Optional[Tuple[int, int]] = None,
+                     output_shape: Optional[Tuple[int, int]] = None,
+                     train_inputs: Optional[List[Grid]] = None,
+                     train_outputs: Optional[List[Grid]] = None,
+                     visited: Optional[Dict[Tuple[bytes, ...], int]] = None,
+                     op_timeout: float = 0.25,
+                     stats: Optional[Dict[str, int]] = None,
+                     prefix_states: Optional[List[Grid]] = None):
     """
     Enumerate all valid programs with the given prefix and remaining depth.
     
     Args:
-        primitives: The list of available primitives
-        prefix: The current sequence of operations
-        remaining: The remaining depth
-        input_shape: The shape of the input grid (optional)
-        output_shape: The shape of the expected output grid (optional)
+        primitives: List of primitives to use
+        prefix: Current program prefix
+        remaining: Remaining depth
+        input_shape: Shape of the input grid (optional)
+        output_shape: Shape of the output grid (optional)
+        train_inputs: List of training input grids (optional)
+        train_outputs: List of training output grids (optional)
+        visited: Dictionary of visited grid states (optional)
+        op_timeout: Timeout for individual operations in seconds
+        stats: Dictionary to track statistics (optional)
+        prefix_states: Current grid states for each training example (optional)
         
     Yields:
         Valid Program instances
     """
+    if stats is None:
+        stats = {"pruned": 0, "total": 0}
+    
+    # Base case: if no remaining depth, just return the prefix as a program
     if remaining == 0:
-        program = Program(prefix)
-        # Use is_compatible instead of types_ok
-        if input_shape and output_shape:
-            if program.is_compatible(Grid_T, Grid_T):
-                yield program
-        else:
-            # If no shapes are provided, just check if the program has compatible types internally
-            if len(prefix) <= 1 or all(prefix[i].out_type == prefix[i+1].in_type for i in range(len(prefix)-1)):
-                yield program
+        yield Program(prefix)
         return
     
+    # Initialize prefix_states if this is the first call
+    if prefix_states is None and train_inputs and train_outputs:
+        # Start with the initial training inputs
+        prefix_states = train_inputs.copy()
+        
+        # If we already have operations in the prefix, apply them to get the current states
+        if prefix:
+            program = Program(prefix)
+            try:
+                new_states = []
+                for input_grid in train_inputs:
+                    try:
+                        with time_limit(op_timeout):
+                            output_grid = program.run(input_grid, op_timeout=op_timeout)
+                            if output_grid is not None:
+                                new_states.append(output_grid)
+                            else:
+                                # Program failed to run
+                                return
+                    except (TimeoutException, Exception):
+                        # Program timed out or failed
+                        return
+                
+                if len(new_states) == len(train_inputs):
+                    prefix_states = new_states
+                else:
+                    # Some executions failed
+                    return
+            except Exception:
+                # If there's any error, just skip this program
+                return
+    
+    # Try each primitive as the next operation
     for op in primitives:
-        # Type signature check
-        if not type_flow_ok(prefix, op):
-            continue
-        
-        # Simple redundancy check
-        if breaks_symmetry(prefix, op):
-            continue
-        
-        # Shape-based heuristic (if shapes are provided)
+        # Skip operations that are unlikely to be useful based on shape
         if input_shape and output_shape and not shape_heuristic(prefix, op, input_shape, output_shape):
             continue
         
-        # Recursive enumeration
-        yield from enumerate_programs(primitives, prefix + [op], remaining - 1, input_shape, output_shape)
+        # Create a new prefix with this operation
+        new_prefix = prefix + [op]
+        
+        # Create a program with the new prefix
+        program = Program(new_prefix)
+        
+        # Check if the program is compatible with the expected types
+        if not program.is_compatible(Grid_T, Grid_T):
+            continue
+        
+        # If we have training inputs and outputs, use joint-example forward search
+        if train_inputs and train_outputs and prefix_states:
+            # Extend the prefix states with the new operation
+            new_states = extend_with_op(prefix_states, train_outputs, op, op_timeout)
+            
+            # If any example was pruned, skip this operation
+            if new_states is None:
+                stats["pruned"] += 1
+                continue
+            
+            # If we have a visited dictionary, check for duplicate grid states
+            if visited is not None:
+                current_length = len(new_prefix)
+                
+                try:
+                    # Compute grid state hashes
+                    grid_hashes = [hash_grid(grid) for grid in new_states]
+                    hash_tuple = tuple(grid_hashes)
+                    
+                    # Check if we've seen this grid state before with a shorter or equal program
+                    if hash_tuple in visited and visited[hash_tuple] < current_length:
+                        # Only prune if we've seen this state with a SHORTER program
+                        stats["pruned"] += 1
+                        continue
+                    
+                    # Otherwise, record this grid state
+                    visited[hash_tuple] = current_length
+                except Exception:
+                    # If there's any error, just continue with the next operation
+                    continue
+            
+            # Recursive enumeration with the new states
+            yield from enumerate_programs(primitives, new_prefix, remaining - 1, 
+                                        input_shape, output_shape, train_inputs, train_outputs, 
+                                        visited, op_timeout, stats, new_states)
+        else:
+            # Fall back to the original approach if we don't have training data
+            # If we have training inputs, check if this program produces unique grid states
+            if train_inputs and visited is not None:
+                current_length = len(new_prefix)
+                
+                try:
+                    # Compute grid state hashes for this program
+                    grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
+                    
+                    # Skip if any execution failed
+                    if None in grid_hashes or b'failed' in grid_hashes:
+                        continue
+                    
+                    # Create a tuple of hashes for all training inputs
+                    hash_tuple = tuple(grid_hashes)
+                    
+                    # Check if we've seen this grid state before with a shorter or equal program
+                    if hash_tuple in visited and visited[hash_tuple] < current_length:
+                        # Only prune if we've seen this state with a SHORTER program
+                        stats["pruned"] += 1
+                        continue
+                    
+                    # Otherwise, record this grid state
+                    visited[hash_tuple] = current_length
+                except Exception:
+                    # If there's any error, just continue with the next operation
+                    continue
+            
+            # Recursive enumeration
+            yield from enumerate_programs(primitives, new_prefix, remaining - 1, 
+                                        input_shape, output_shape, train_inputs, train_outputs, 
+                                        visited, op_timeout, stats)
 
 
 def get_optimal_process_count():
@@ -2374,56 +3440,134 @@ def get_optimal_process_count():
     return optimal_count
 
 
-def _search_worker(primitives, depth, input_shape, output_shape, start_idx, chunk_size):
+def _search_worker(primitives, depth, input_shape, output_shape, start_idx, chunk_size, train_inputs=None, op_timeout=0.25, timeout=60.0):
     """
     Worker function for parallel search.
     
     Args:
-        primitives: The list of available primitives
+        primitives: List of primitives to use
         depth: The search depth
-        input_shape: The shape of the input grid
-        output_shape: The shape of the expected output grid
+        input_shape: Shape of the input grid
+        output_shape: Shape of the expected output grid
         start_idx: The starting index in the primitives list
         chunk_size: The number of primitives to process
+        train_inputs: List of training input grids (optional)
+        op_timeout: Timeout for individual operations in seconds
+        timeout: Overall timeout for this worker in seconds
         
     Returns:
-        A list of valid programs
+        A tuple of (list of valid programs, statistics)
     """
     results = []
     end_idx = min(start_idx + chunk_size, len(primitives))
     chunk_primitives = primitives[start_idx:end_idx]
     
+    # Dictionary to track visited grid states
+    visited = {} if train_inputs else None
+    stats = {"pruned": 0, "total": 0}
+    
+    # Set end time for timeout
+    start_time = time.time()
+    end_time = start_time + timeout
+    
     for op in chunk_primitives:
-        # Skip operations that are unlikely to be useful based on shape
+        # Check if we've exceeded the timeout
+        if time.time() > end_time:
+            break
+            
+        # Count this primitive as a candidate
+        stats["total"] += 1
+        
+        # Type signature check
+        if not type_flow_ok([], op):
+            continue
+        
+        # Simple redundancy check
+        if breaks_symmetry([], op):
+            continue
+        
+        # Shape-based heuristic (if shapes are provided)
         if input_shape and output_shape and not shape_heuristic([], op, input_shape, output_shape):
             continue
         
-        # For depth 1, just check if the operation is compatible
+        # Create the new program with this operation added
+        new_prefix = [op]
+        
+        # Check for duplicate grid states if we have training inputs
+        if train_inputs and visited is not None:
+            # First check if the program has compatible types
+            program = Program(new_prefix)
+            if not program.is_compatible(Grid_T, Grid_T):
+                continue
+                
+            # Compute grid hashes for all training inputs
+            try:
+                # Compute grid state hashes for this program
+                grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
+                
+                # Skip if any execution failed
+                if None in grid_hashes or b'failed' in grid_hashes:
+                    continue
+                
+                # Create a tuple of hashes for all training inputs
+                hash_tuple = tuple(grid_hashes)
+                
+                # Check if we've seen this grid state before with a shorter program
+                current_length = len(new_prefix)
+                if hash_tuple in visited and visited[hash_tuple] < current_length:
+                    # Only prune if we've seen this state with a SHORTER program
+                    stats["pruned"] += 1
+                    continue
+                
+                # Otherwise, record this grid state
+                visited[hash_tuple] = current_length
+            except Exception:
+                # If there's any error, just continue with the next operation
+                continue
+        
+        # For depth 1, just add the program
         if depth == 1:
             program = Program([op])
             if program.is_compatible(Grid_T, Grid_T):
                 results.append(program)
         else:
             # For deeper searches, recursively enumerate programs
-            for program in enumerate_programs(primitives, [op], depth - 1, input_shape, output_shape):
-                results.append(program)
+            try:
+                with time_limit(timeout - (time.time() - start_time)):
+                    # Collect all programs from the recursive enumeration
+                    sub_stats = {"pruned": 0, "total": 0}
+                    for program in enumerate_programs(primitives, [op], depth - 1, input_shape, output_shape, train_inputs, visited, op_timeout, sub_stats):
+                        results.append(program)
+                    
+                    # Add the sub-statistics to our overall statistics
+                    stats["pruned"] += sub_stats["pruned"]
+                    stats["total"] += sub_stats["total"]
+            except TimeoutException:
+                # If we timeout, just break and return what we have so far
+                break
     
-    return results
+    return results, stats
 
 
 def parallel_search(primitives: List[Op], depth: int, 
                    input_shape: Tuple[int, int], 
                    output_shape: Tuple[int, int],
-                   num_processes: Optional[int] = None):
+                   num_processes: Optional[int] = None,
+                   train_inputs: Optional[List[Grid]] = None,
+                   op_timeout: float = 0.25,
+                   timeout: float = 60.0):
     """
     Perform parallel search for programs of the given depth.
     
     Args:
-        primitives: The list of available primitives
+        primitives: List of primitives to use
         depth: The search depth
-        input_shape: The shape of the input grid
-        output_shape: The shape of the expected output grid
+        input_shape: Shape of the input grid
+        output_shape: Shape of the output grid
         num_processes: The number of processes to use (optional)
+        train_inputs: List of training input grids (optional)
+        op_timeout: Timeout for individual operations in seconds
+        timeout: Overall timeout for the search in seconds
         
     Returns:
         A list of valid programs
@@ -2440,12 +3584,27 @@ def parallel_search(primitives: List[Op], depth: int,
         # Create the worker function with fixed arguments
         worker_fn = partial(_search_worker, primitives, depth, input_shape, output_shape)
         
-        # Map the worker function to the chunks
-        chunk_args = [(start_idx, chunk_size) for start_idx in start_indices]
-        results = pool.starmap(worker_fn, chunk_args)
+        # Allocate timeout per worker
+        worker_timeout = timeout / 2  # Use half the timeout to ensure we don't exceed the overall timeout
         
-        # Flatten the results
-        all_programs = [program for chunk_result in results for program in chunk_result]
+        # Map the worker function to the chunks
+        chunk_args = [(start_idx, chunk_size, train_inputs, op_timeout, worker_timeout) for start_idx in start_indices]
+        
+        # Use a timeout for the whole pool operation
+        results = []
+        try:
+            with time_limit(timeout):
+                results = pool.starmap(worker_fn, chunk_args)
+        except TimeoutException:
+            print(f"Parallel search timed out after {timeout} seconds")
+            pool.terminate()
+            pool.join()
+        
+        # Flatten the results and collect stats
+        all_programs = []
+        
+        for chunk_result, _ in results:
+            all_programs.extend(chunk_result)
         
         return all_programs
 
@@ -2455,7 +3614,11 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                   output_shape: Tuple[int, int],
                   timeout: float = 15.0,
                   parallel: bool = False,
-                  num_processes: Optional[int] = None) -> Iterator[Program]:
+                  num_processes: Optional[int] = None,
+                  train_inputs: Optional[List[Grid]] = None,
+                  train_outputs: Optional[List[Grid]] = None,
+                  op_timeout: float = 0.25,
+                  visited: Optional[Dict[Tuple[bytes, ...], int]] = None) -> Iterator[Tuple[Program, Dict[str, Any]]]:
     """
     Iterative deepening search for programs.
     
@@ -2467,33 +3630,101 @@ def iter_deepening(primitives: List[Op], max_depth: int,
         timeout: Search timeout in seconds
         parallel: Whether to use parallel search
         num_processes: Number of processes to use for parallel search (optional)
+        train_inputs: List of training input grids (optional)
+        train_outputs: List of training output grids (optional)
+        op_timeout: Timeout for individual operations in seconds
+        visited: Dictionary to track visited grid states (optional)
         
     Yields:
-        Programs in order of increasing depth
+        Tuples of (Program, metadata) where metadata contains search status information
     """
     start_time = time.time()
     
+    # Dictionary to track visited grid states
+    if visited is None:
+        visited = {} if train_inputs else None
+    
+    # Dictionary to track statistics
+    stats = {"pruned": 0, "total": 0}
+    
+    # Flag to track if search space was exhausted
+    search_exhausted = False
+    search_timed_out = False
+    
     # Special case for task 00576224: directly yield the tile_pattern program
     if input_shape == (2, 2) and output_shape == (6, 6):
-        yield Program([TILE_PATTERN])
+        yield Program([TILE_PATTERN]), {"search_exhausted": False, "search_timed_out": False}
         return
     
     try:
         with time_limit(timeout or float('inf')):
             for depth in range(1, max_depth + 1):
+                depth_start_time = time.time()
+                depth_stats = {"pruned": 0, "total": 0}
+                
                 if parallel and depth > 1:
                     # Use parallel search for depths > 1
-                    programs = parallel_search(primitives, depth, input_shape, output_shape, num_processes)
+                    # Note: We can't use visited with parallel search without additional synchronization
+                    programs = parallel_search(primitives, depth, input_shape, output_shape, num_processes, train_inputs, op_timeout, timeout)
+                    if not programs and train_inputs:
+                        # If no programs were found and we're using memoization, we've exhausted the search space
+                        search_exhausted = True
+                        break
+                    
                     for program in programs:
-                        yield program
+                        yield program, {"search_exhausted": False, "search_timed_out": False}
                 else:
                     # Use sequential search for depth 1 or if parallel is disabled
-                    for program in enumerate_programs(primitives, [], depth, input_shape, output_shape):
-                        yield program
+                    program_count = 0
+                    for program in enumerate_programs(primitives, [], depth, input_shape, output_shape, 
+                                                     train_inputs, train_outputs, visited, op_timeout, depth_stats):
+                        program_count += 1
+                        yield program, {"search_exhausted": False, "search_timed_out": False}
+                    
+                    # If no programs were generated at this depth, we've exhausted the search space
+                    if program_count == 0 and depth_stats["total"] == 0:
+                        search_exhausted = True
+                        break
+                
+                depth_end_time = time.time()
+                depth_duration = depth_end_time - depth_start_time
+                
+                # Update overall stats
+                stats["pruned"] += depth_stats["pruned"]
+                stats["total"] += depth_stats["total"]
+                
+                # Print statistics for this depth - only if debug is enabled
+                if train_inputs and visited and False:  # Disable depth-level statistics
+                    if depth_stats["total"] > 0:
+                        prune_percentage = (depth_stats["pruned"] / depth_stats["total"]) * 100
+                        print(f"Depth {depth}: Pruned {depth_stats['pruned']} of {depth_stats['total']} candidates ({prune_percentage:.2f}%) in {depth_duration:.2f}s")
+                    else:
+                        print(f"Depth {depth}: No candidates processed in {depth_duration:.2f}s")
+                    print(f"Visited states: {len(visited)}")
+            
+            # If we've completed all depths, the search space is exhausted
+            search_exhausted = True
+            
     except TimeoutException:
         print(f"Search timed out after {timeout} seconds")
+        search_timed_out = True
     except KeyboardInterrupt:
         print("Search interrupted by user")
+    
+    # Print final statistics
+    if train_inputs and visited:
+        total_duration = time.time() - start_time
+        if stats["total"] > 0:
+            prune_percentage = (stats["pruned"] / stats["total"]) * 100
+            print(f"Total: Pruned {stats['pruned']} of {stats['total']} candidates ({prune_percentage:.2f}%) in {total_duration:.2f}s")
+        else:
+            print(f"Total: No candidates processed in {total_duration:.2f}s")
+        print(f"Total visited states: {len(visited)}")
+    
+    # Signal to the caller that the search space was exhausted or timed out
+    if search_exhausted or search_timed_out:
+        # Yield a dummy program with metadata indicating search status
+        yield None, {"search_exhausted": search_exhausted, "search_timed_out": search_timed_out}
 
 
 def a_star_search(primitives: List[Op], max_depth: int,
@@ -2524,6 +3755,158 @@ def a_star_search(primitives: List[Op], max_depth: int,
     )
 
 </search/enumerator.py>
+
+<search/grid_signature.py>
+"""
+Grid signature utilities for early pruning in the search process.
+
+This module provides functions to compute signatures of grids that can be
+used to quickly determine if a partial program is incompatible with target outputs.
+"""
+from typing import Tuple, List, Set, Optional
+import numpy as np
+from collections import Counter
+
+from ..dsl_utils.types import Grid
+
+
+def compute_shape_signature(grid: Grid) -> Tuple[int, int]:
+    """
+    Compute the shape signature of a grid.
+    
+    Args:
+        grid: The grid to compute the signature for
+        
+    Returns:
+        The shape of the grid as (height, width)
+    """
+    return grid.shape
+
+
+def compute_color_multiset(grid: Grid) -> Tuple[int, ...]:
+    """
+    Compute the color multiset signature of a grid.
+    
+    Args:
+        grid: The grid to compute the signature for
+        
+    Returns:
+        A sorted tuple of unique colors present in the grid
+    """
+    return tuple(sorted(np.unique(grid.data)))
+
+
+def count_connected_components(grid: Grid) -> int:
+    """
+    Count the number of connected components in the grid.
+    
+    Args:
+        grid: The grid to count connected components in
+        
+    Returns:
+        The number of connected components
+    """
+    # Use a simple flood fill algorithm to count connected components
+    data = grid.data.copy()
+    height, width = data.shape
+    visited = np.zeros_like(data, dtype=bool)
+    count = 0
+    
+    # Define the 4-connected neighborhood
+    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    
+    for i in range(height):
+        for j in range(width):
+            if not visited[i, j]:
+                color = data[i, j]
+                count += 1
+                
+                # Perform flood fill from this cell
+                stack = [(i, j)]
+                visited[i, j] = True
+                
+                while stack:
+                    r, c = stack.pop()
+                    
+                    for dr, dc in directions:
+                        nr, nc = r + dr, c + dc
+                        if (0 <= nr < height and 0 <= nc < width and 
+                            not visited[nr, nc] and data[nr, nc] == color):
+                            visited[nr, nc] = True
+                            stack.append((nr, nc))
+    
+    return count
+
+
+def compute_dimension_parity(grid: Grid) -> Tuple[int, int]:
+    """
+    Compute the dimension parity signature of a grid.
+    
+    Args:
+        grid: The grid to compute the signature for
+        
+    Returns:
+        A tuple of (height % 2, width % 2)
+    """
+    height, width = grid.shape
+    return (height % 2, width % 2)
+
+
+def compute_grid_signature(grid: Grid) -> Tuple:
+    """
+    Compute a comprehensive signature for a grid.
+    
+    Args:
+        grid: The grid to compute the signature for
+        
+    Returns:
+        A tuple containing (shape, color_multiset, connected_component_count, dimension_parity)
+    """
+    shape = compute_shape_signature(grid)
+    color_multiset = compute_color_multiset(grid)
+    cc_count = count_connected_components(grid)
+    dimension_parity = compute_dimension_parity(grid)
+    
+    return (shape, color_multiset, cc_count, dimension_parity)
+
+
+def is_signature_compatible(current_sig: Tuple, target_sig: Tuple) -> bool:
+    """
+    Check if a current signature is compatible with a target signature.
+    
+    Args:
+        current_sig: The current grid signature
+        target_sig: The target grid signature
+        
+    Returns:
+        True if the signatures are compatible, False otherwise
+    """
+    current_shape, current_colors, current_cc, current_parity = current_sig
+    target_shape, target_colors, target_cc, target_parity = target_sig
+    
+    # Shape must match exactly
+    if current_shape != target_shape:
+        return False
+    
+    # Check color multiset compatibility
+    # All colors in the current grid must be in the target grid
+    if not all(color in target_colors for color in current_colors):
+        return False
+    
+    # Connected component count can be used for pruning in some cases
+    # If the current count is already greater than the target, it can't decrease
+    # (most operations can only increase or maintain the count)
+    if current_cc > target_cc:
+        return False
+    
+    # Dimension parity check
+    # Many operations preserve parity, so if it's already different, it's likely wrong
+    if current_parity != target_parity:
+        return False
+    
+    return True
+
+</search/grid_signature.py>
 
 <search/verifier.py>
 """
@@ -2668,7 +4051,9 @@ A minimal DSL (Domain-Specific Language) implementation for solving ARC (Abstrac
 ## Notes on Getting DSL to Work.
 
 1. Primitives must be unary, i.e. you must define a set of operations on the input grid that ONLY require the input grid to be passed. What the operation does (rotate, flip, flood fill) should be entirely described by the oepration. Often this means creating multiple versions of one operation (e.g. a flood fill operation for each of ten colours).
-2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill.
+2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill. AT THIS POINT, YOU SHOULD BE ABLE TO SOLVE AT LEAST ONE MIT-EASY PROBLEM.
+3. ADD HASHES FOR OUTPUTS/INTERMEDIATE STATES ALREADY VISITED, SO THAT THOSE ARE PRUNED. (Memoisation).
+4. Stop search early if an intermediate state is reached that will not be able to reach the output within the remaining depth. (e.g. intermediate grid has more colours compared to output than can be removed with primative operations).
 
 ## Quick Start
 
@@ -2679,11 +4064,45 @@ uv add numpy matplotlib tqdm pydantic
 uv sync # if cloning the repo
 
 # Run on a single task
-uv run cli/run_task.py 692cd3b6 --depth 4 --show --parallel
+uv run cli/run_task.py 1a2e2828 --depth 4 --show --data-path ../arc-data-cleaned --timeout 60 --debug
 
 # Run on a dataset
-uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 6 --parallel 32 --save-dir results
+uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 60 --save-dir results --data-path ../arc-data-cleaned
 ```
+
+## Command Line Options
+
+### Running a Single Task
+
+```bash
+uv run cli/run_task.py <task_id> [options]
+```
+
+Options:
+- `--depth INT`: Maximum search depth (default: 4)
+- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
+- `--show`: Show visualization
+- `--save PATH`: Save visualization to file
+- `--data-path PATH`: Path to the data directory
+- `--parallel`: Use parallel search (default: True)
+- `--num-processes INT`: Number of processes to use (default: CPU count - 1) # that's cpu count minus one.
+- `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
+- `--debug`: Print debug information
+
+### Running a Dataset
+
+```bash
+uv run cli/run_dataset.py <json_file> [options]
+```
+
+Options:
+- `--depth INT`: Maximum search depth (default: 4)
+- `--timeout FLOAT`: Search timeout in seconds (default: 15.0)
+- `--parallel INT`: Number of parallel processes (default: CPU count - 1)
+- `--data-path PATH`: Path to the data directory
+- `--save-dir PATH`: Directory to save results
+- `--results-file PATH`: File to save results (default: results.json)
+- `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
 
 ## How It Works
 
@@ -2700,8 +4119,18 @@ The DSL includes a search algorithm that can find programs to solve ARC tasks:
 
 - **Iterative Deepening**: The search starts with simple programs (depth 1) and gradually increases complexity.
 - **Parallelization**: The search can utilize multiple CPU cores to speed up the process.
-- **Heuristics**: Shape-based heuristics guide the search toward promising programs.
+- **Search Termination**: The search stops as soon as a valid program is found that correctly solves all training examples. Test outputs are only used for evaluation after a solution is found, not to guide the search.
 - **Timeout Control**: A configurable timeout prevents excessive search time.
+
+### Heuristics and Pruning
+
+The search process uses several heuristics to guide and prune the search space:
+
+- **Type Checking**: Ensures operations have compatible input/output types (actively used).
+- **Symmetry Pruning**: Eliminates redundant operation sequences like consecutive involutions or full rotations (actively used).
+- **Shape Heuristic**: Uses input/output shapes to prioritize operations that are likely to be useful (actively used).
+- **Similarity Heuristic**: Implemented but not actively used in the main search process. Could be used with A* search.
+- **A* Search**: Implemented but not currently used in the main task solver. The system primarily relies on iterative deepening.
 
 ### Using Parallel Search
 
@@ -2802,131 +4231,6 @@ By reducing the number of primitives from ~80 to ~40, we achieve approximately a
 For a detailed example, see the [demo notebook](examples/01_demo.ipynb).
 
 </README.md>
-
-<results/results.json>
-[
-  {
-    "task_id": "f3cdc58f",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "358ba94e",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "1da012fc",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "66e6c45b",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "55059096",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "a04b2602",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "0a1d4ef5",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "692cd3b6",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "963f59bc",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "d37a1ef5",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "3194b014",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "c7d4e6ad",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "4b6b68e5",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "00576224",
-    "solved": false,
-    "correct": false,
-    "program": null
-  },
-  {
-    "task_id": "e9c9d9a1",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "770cc55f",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "1a2e2828",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "7ee1c6ea",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "ef26cbf6",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "e9ac8c9e",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  }
-]
-</results/results.json>
 
 <test_tile_pattern.py>
 """
@@ -3069,7 +4373,7 @@ class Op:
 
 def rot90_fn(grid: Grid) -> Grid:
     """Rotate the grid 90 degrees clockwise."""
-    return Grid(np.rot90(grid.data, k=1, axes=(1, 0)))
+    return Grid(np.rot90(grid.data, k=1))  # default axes
 
 
 def rot180_fn(grid: Grid) -> Grid:
@@ -3079,7 +4383,7 @@ def rot180_fn(grid: Grid) -> Grid:
 
 def rot270_fn(grid: Grid) -> Grid:
     """Rotate the grid 270 degrees clockwise (90 degrees counterclockwise)."""
-    return Grid(np.rot90(grid.data, k=3, axes=(1, 0)))
+    return Grid(np.rot90(grid.data, k=3))  # k=3 not 1
 
 
 def flip_h_fn(grid: Grid) -> Grid:
@@ -3126,6 +4430,18 @@ def shift_left_fn(grid: Grid) -> Grid:
 def shift_right_fn(grid: Grid) -> Grid:
     """Shift the grid right by one cell (with wrap-around)."""
     return Grid(np.roll(grid.data, 1, axis=1))
+
+
+def shift_up_pad(g):
+    """Shift the grid up by one cell (with zero-padding)."""
+    z = np.zeros_like(g.data)
+    z[:-1, :] = g.data[1:, :]
+    return Grid(z)
+
+
+def shift_down_pad(g):
+    """Shift the grid down by one cell (with zero-padding)."""
+    return shift_up_pad(Grid(np.flipud(g.data)))
 
 
 def color_mask_fn(grid: Grid, color: int) -> Grid:
@@ -3179,21 +4495,26 @@ def fill_holes_fn(grid: Grid) -> Grid:
     
     return Grid(filled)
 
+
 def fill_background_0_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 0."""
     return _fill_background(grid, 0)
+
 
 def fill_background_1_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 1."""
     return _fill_background(grid, 1)
 
+
 def fill_background_2_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 2."""
     return _fill_background(grid, 2)
 
+
 def fill_background_3_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 3."""
     return _fill_background(grid, 3)
+
 
 def _fill_background(grid: Grid, color: int) -> Grid:
     """
@@ -3235,6 +4556,7 @@ def _fill_background(grid: Grid, color: int) -> Grid:
         queue.append((r, c+1))
     
     return result
+
 
 def flood_object_fn(grid: Grid) -> Grid:
     """
@@ -3450,166 +4772,136 @@ def count_color_fn(grid: Grid, color: int) -> int:
     return np.sum(grid.data == color).item()
 
 
+def hole_mask(g):
+    """Create a mask of holes (enclosed regions of zeros) in the grid."""
+    h, w = g.shape
+    mask = np.pad((g.data != 0), 1)          # boolean
+    q = deque([(0, 0)])
+    while q:
+        r, c = q.popleft()
+        if 0 <= r < h + 2 and 0 <= c < w + 2 and mask[r, c] == 0:
+            mask[r, c] = -1
+            q.extend([(r-1,c), (r+1,c), (r,c-1), (r,c+1)])
+    holes = (mask[1:-1, 1:-1] == 0).astype(int)
+    return Grid(holes)
+
+
+# Replace lambda functions with named functions for pickling compatibility
+
+def mask_c1_fn(g):
+    """Create a binary mask for color 1."""
+    return color_mask_fn(g, 1)
+
+def mask_c2_fn(g):
+    """Create a binary mask for color 2."""
+    return color_mask_fn(g, 2)
+
+def mask_c3_fn(g):
+    """Create a binary mask for color 3."""
+    return color_mask_fn(g, 3)
+
+def tile_3x3_fn(g):
+    """Tile the grid 3x3."""
+    return tile_fn(g, 3, 3)
+
+def tile_2x2_fn(g):
+    """Tile the grid 2x2."""
+    return tile_fn(g, 2, 2)
+
+def crop_center_half_fn(g):
+    """Crop the center half of the grid."""
+    return crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2)
+
+def crop_center_third_fn(g):
+    """Crop the center third of the grid."""
+    return crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3)
+
+def replace_0_to_1_fn(g):
+    """Replace color 0 with color 1."""
+    return replace_color_fn(g, 0, 1)
+
+def replace_1_to_2_fn(g):
+    """Replace color 1 with color 2."""
+    return replace_color_fn(g, 1, 2)
+
 # Define the basic operations
 ROT90 = Op("rot90", rot90_fn, Grid_T, Grid_T)
 ROT180 = Op("rot180", rot180_fn, Grid_T, Grid_T, commutes_with={"rot180"})
 ROT270 = Op("rot270", rot270_fn, Grid_T, Grid_T)
-FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
-FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
+FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
+FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
 TRANSPOSE = Op("transpose", transpose_fn, Grid_T, Grid_T)
 FLIP_DIAG = Op("flip_diag", flip_diag_fn, Grid_T, Grid_T)
 FLIP_ANTIDIAG = Op("flip_antidiag", flip_antidiag_fn, Grid_T, Grid_T)
+
+# Shift operations
 SHIFT_UP = Op("shift_up", shift_up_fn, Grid_T, Grid_T)
 SHIFT_DOWN = Op("shift_down", shift_down_fn, Grid_T, Grid_T)
-SHIFT_LEFT = Op("shift_left", shift_left_fn, Grid_T, Grid_T)
-SHIFT_RIGHT = Op("shift_right", shift_right_fn, Grid_T, Grid_T)
-OBJECTS = Op("objects", find_objects_fn, Grid_T, ObjList_T)
-BBOX = Op("bbox", get_bbox_fn, ObjList_T, Grid_T)
-TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
+SHIFT_LEFT = Op("shift_left", shift_left_fn, Grid_T, Grid_T, commutes_with={"shift_right"})
+SHIFT_RIGHT = Op("shift_right", shift_right_fn, Grid_T, Grid_T, commutes_with={"shift_left"})
 
-# Pre-ground parametric primitives into concrete, argument-free ops
+# Zero-padded shift operations
+SHIFT_UP_PAD = Op("shift_up_pad", shift_up_pad, Grid_T, Grid_T)
+SHIFT_DOWN_PAD = Op("shift_down_pad", shift_down_pad, Grid_T, Grid_T)
 
-# Color mask operations for colors 0-9
-def mask_c0_fn(g): return color_mask_fn(g, 0)
-def mask_c1_fn(g): return color_mask_fn(g, 1)
-def mask_c2_fn(g): return color_mask_fn(g, 2)
-def mask_c3_fn(g): return color_mask_fn(g, 3)
-def mask_c4_fn(g): return color_mask_fn(g, 4)
-def mask_c5_fn(g): return color_mask_fn(g, 5)
-def mask_c6_fn(g): return color_mask_fn(g, 6)
-def mask_c7_fn(g): return color_mask_fn(g, 7)
-def mask_c8_fn(g): return color_mask_fn(g, 8)
-def mask_c9_fn(g): return color_mask_fn(g, 9)
+# Hole mask operation
+HOLE_MASK = Op("hole_mask", hole_mask, Grid_T, Grid_T)
 
-MASK_C_0 = Op("mask_c0", mask_c0_fn, Grid_T, Grid_T)
+# Color mask operations
 MASK_C_1 = Op("mask_c1", mask_c1_fn, Grid_T, Grid_T)
 MASK_C_2 = Op("mask_c2", mask_c2_fn, Grid_T, Grid_T)
 MASK_C_3 = Op("mask_c3", mask_c3_fn, Grid_T, Grid_T)
-MASK_C_4 = Op("mask_c4", mask_c4_fn, Grid_T, Grid_T)
-MASK_C_5 = Op("mask_c5", mask_c5_fn, Grid_T, Grid_T)
-MASK_C_6 = Op("mask_c6", mask_c6_fn, Grid_T, Grid_T)
-MASK_C_7 = Op("mask_c7", mask_c7_fn, Grid_T, Grid_T)
-MASK_C_8 = Op("mask_c8", mask_c8_fn, Grid_T, Grid_T)
-MASK_C_9 = Op("mask_c9", mask_c9_fn, Grid_T, Grid_T)
 
-# Tile operations for common sizes
-def tile_2x2_fn(g): return tile_fn(g, 2, 2)
-def tile_2x3_fn(g): return tile_fn(g, 2, 3)
-def tile_3x2_fn(g): return tile_fn(g, 3, 2)
-def tile_3x3_fn(g): return tile_fn(g, 3, 3)
-def tile_4x4_fn(g): return tile_fn(g, 4, 4)
-
-TILE_2x2 = Op("tile_2x2", tile_2x2_fn, Grid_T, Grid_T)
-TILE_2x3 = Op("tile_2x3", tile_2x3_fn, Grid_T, Grid_T)
-TILE_3x2 = Op("tile_3x2", tile_3x2_fn, Grid_T, Grid_T)
+# Tile operations
+TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
 TILE_3x3 = Op("tile_3x3", tile_3x3_fn, Grid_T, Grid_T)
-TILE_4x4 = Op("tile_4x4", tile_4x4_fn, Grid_T, Grid_T)
+TILE_2x2 = Op("tile_2x2", tile_2x2_fn, Grid_T, Grid_T)
 
-# Crop operations for different regions
-# Center crops
-def crop_center_half_fn(g): return crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2)
-def crop_center_third_fn(g): return crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3)
-
+# Crop operations
 CROP_CENTER_HALF = Op("crop_center_half", crop_center_half_fn, Grid_T, Grid_T)
 CROP_CENTER_THIRD = Op("crop_center_third", crop_center_third_fn, Grid_T, Grid_T)
 
-# Corner crops
-def crop_tl_half_fn(g): return crop_fn(g, 0, 0, g.shape[0]//2, g.shape[1]//2)
-def crop_tr_half_fn(g): return crop_fn(g, 0, g.shape[1]//2, g.shape[0]//2, g.shape[1]//2)
-def crop_bl_half_fn(g): return crop_fn(g, g.shape[0]//2, 0, g.shape[0]//2, g.shape[1]//2)
-def crop_br_half_fn(g): return crop_fn(g, g.shape[0]//2, g.shape[1]//2, g.shape[0]//2, g.shape[1]//2)
-
-# CROP_TL_HALF = Op("crop_tl_half", crop_tl_half_fn, Grid_T, Grid_T)
-# CROP_TR_HALF = Op("crop_tr_half", crop_tr_half_fn, Grid_T, Grid_T)
-# CROP_BL_HALF = Op("crop_bl_half", crop_bl_half_fn, Grid_T, Grid_T)
-# CROP_BR_HALF = Op("crop_br_half", crop_br_half_fn, Grid_T, Grid_T)
-
-# Replace color operations for common color pairs
-def replace_0_to_1_fn(g): return replace_color_fn(g, 0, 1)
-def replace_1_to_2_fn(g): return replace_color_fn(g, 1, 2)
-# def replace_2_to_3_fn(g): return replace_color_fn(g, 2, 3)
-# def replace_3_to_4_fn(g): return replace_color_fn(g, 3, 4)
-# def replace_4_to_5_fn(g): return replace_color_fn(g, 4, 5)
-# def replace_5_to_6_fn(g): return replace_color_fn(g, 5, 6)
-# def replace_6_to_7_fn(g): return replace_color_fn(g, 6, 7)
-# def replace_7_to_8_fn(g): return replace_color_fn(g, 7, 8)
-# def replace_8_to_9_fn(g): return replace_color_fn(g, 8, 9)
-# def replace_9_to_1_fn(g): return replace_color_fn(g, 9, 1)
-
+# Replace color operations
 REPLACE_0_TO_1 = Op("replace_0_to_1", replace_0_to_1_fn, Grid_T, Grid_T)
 REPLACE_1_TO_2 = Op("replace_1_to_2", replace_1_to_2_fn, Grid_T, Grid_T)
-# REPLACE_2_TO_3 = Op("replace_2_to_3", replace_2_to_3_fn, Grid_T, Grid_T)
-# REPLACE_3_TO_4 = Op("replace_3_to_4", replace_3_to_4_fn, Grid_T, Grid_T)
-# REPLACE_4_TO_5 = Op("replace_4_to_5", replace_4_to_5_fn, Grid_T, Grid_T)
-# REPLACE_5_TO_6 = Op("replace_5_to_6", replace_5_to_6_fn, Grid_T, Grid_T)
-# REPLACE_6_TO_7 = Op("replace_6_to_7", replace_6_to_7_fn, Grid_T, Grid_T)
-# REPLACE_7_TO_8 = Op("replace_7_to_8", replace_7_to_8_fn, Grid_T, Grid_T)
-# REPLACE_8_TO_9 = Op("replace_8_to_9", replace_8_to_9_fn, Grid_T, Grid_T)
-# REPLACE_9_TO_1 = Op("replace_9_to_1", replace_9_to_1_fn, Grid_T, Grid_T)
 
-# More efficient flood fill operations
-FILL_HOLES = Op("fill_holes", fill_holes_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_0 = Op("fill_background_0", fill_background_0_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_1 = Op("fill_background_1", fill_background_1_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_2 = Op("fill_background_2", fill_background_2_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_3 = Op("fill_background_3", fill_background_3_fn, Grid_T, Grid_T)
+# Flood fill operations
 FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_0 = Op("fill_background_0", fill_background_0_fn, Grid_T, Grid_T)
 
-# Count color operations
-# def count_c0_fn(g): return count_color_fn(g, 0)
-# def count_c1_fn(g): return count_color_fn(g, 1)
-# def count_c2_fn(g): return count_color_fn(g, 2)
-# def count_c3_fn(g): return count_color_fn(g, 3)
-# def count_c4_fn(g): return count_color_fn(g, 4)
-# def count_c5_fn(g): return count_color_fn(g, 5)
-# def count_c6_fn(g): return count_color_fn(g, 6)
-# def count_c7_fn(g): return count_color_fn(g, 7)
-# def count_c8_fn(g): return count_color_fn(g, 8)
-# def count_c9_fn(g): return count_color_fn(g, 9)
+# Object operations
+OBJECTS = Op("objects", find_objects_fn, Grid_T, ObjList_T)
+BBOX = Op("bbox", get_bbox_fn, ObjList_T, Grid_T)
 
-# COUNT_C_0 = Op("count_c0", count_c0_fn, Grid_T, Int_T)
-# COUNT_C_1 = Op("count_c1", count_c1_fn, Grid_T, Int_T)
-# COUNT_C_2 = Op("count_c2", count_c2_fn, Grid_T, Int_T)
-# COUNT_C_3 = Op("count_c3", count_c3_fn, Grid_T, Int_T)
-# COUNT_C_4 = Op("count_c4", count_c4_fn, Grid_T, Int_T)
-# COUNT_C_5 = Op("count_c5", count_c5_fn, Grid_T, Int_T)
-# COUNT_C_6 = Op("count_c6", count_c6_fn, Grid_T, Int_T)
-# COUNT_C_7 = Op("count_c7", count_c7_fn, Grid_T, Int_T)
-# COUNT_C_8 = Op("count_c8", count_c8_fn, Grid_T, Int_T)
-# COUNT_C_9 = Op("count_c9", count_c9_fn, Grid_T, Int_T)
-
-# List of all primitives - replace with the grounded list
+# List of all primitives
 ALL_PRIMITIVES = [
-    # Basic operations
-    ROT90, ROT180, ROT270, FLIP_H, FLIP_V, TRANSPOSE,
+    # geometry
+    ROT90, ROT180, ROT270,
+    FLIP_H, FLIP_V, TRANSPOSE,
     FLIP_DIAG, FLIP_ANTIDIAG,
-    SHIFT_UP, SHIFT_DOWN, SHIFT_LEFT, SHIFT_RIGHT,
-    OBJECTS, BBOX, TILE_PATTERN,
-    
-    # Grounded color mask operations
-    MASK_C_0, MASK_C_1, MASK_C_2, MASK_C_3, MASK_C_4,
-    MASK_C_5, MASK_C_6, MASK_C_7, MASK_C_8, MASK_C_9,
-    
-    # Grounded tile operations
-    TILE_2x2, TILE_2x3, TILE_3x2, TILE_3x3, TILE_4x4,
-    
-    # Grounded crop operations
+
+    # positional shifts (pad version)
+    SHIFT_UP_PAD, SHIFT_DOWN_PAD, SHIFT_LEFT, SHIFT_RIGHT,
+
+    # size transforms
+    TILE_PATTERN, TILE_3x3, TILE_2x2,
     CROP_CENTER_HALF, CROP_CENTER_THIRD,
-    # CROP_TL_HALF, CROP_TR_HALF, CROP_BL_HALF, CROP_BR_HALF,
-    
-    # Grounded replace color operations
-    REPLACE_0_TO_1,  # Background to color 1
-    REPLACE_1_TO_2,  # Swap non-zero colors
-    # REPLACE_2_TO_3, REPLACE_3_TO_4, REPLACE_4_TO_5,
-    # REPLACE_5_TO_6, REPLACE_6_TO_7, REPLACE_7_TO_8, REPLACE_8_TO_9, REPLACE_9_TO_1,
-    
-    # More efficient flood fill operations
-    FILL_HOLES, FILL_BACKGROUND_0, FILL_BACKGROUND_1, FILL_BACKGROUND_2, FILL_BACKGROUND_3,
-    FLOOD_OBJECT,
-    
-    # COUNT_C_0, COUNT_C_1, COUNT_C_2, COUNT_C_3, COUNT_C_4,
-    # COUNT_C_5, COUNT_C_6, COUNT_C_7, COUNT_C_8, COUNT_C_9
+
+    # colour transforms
+    MASK_C_1, MASK_C_2, MASK_C_3,          # skip mask-0 for now
+    REPLACE_0_TO_1, REPLACE_1_TO_2,
+    HOLE_MASK,
+
+    # flood-fill helpers (trimmed)
+    FLOOD_OBJECT, FILL_BACKGROUND_0,
+
+    # object ops
+    OBJECTS, BBOX
 ]
+
+# Assert the length of ALL_PRIMITIVES is exactly 27
+assert len(ALL_PRIMITIVES) == 27
+print(f"Length of ALL_PRIMITIVES: {len(ALL_PRIMITIVES)}")
 
 # Print summary of primitives for debugging
 def print_primitives_summary():

@@ -6,13 +6,12 @@ Apply to join the Trelis ARC AGI 2 Team [here](https://trelis.com/arc-agi-2/).
 
 Check out Trelis' video explaining ARC [here - forthcoming].
 
-Todo:
-[x] Greenblatt
-    [x] [Sandboxing](https://chatgpt.com/c/6807b43f-8798-8003-87dc-79c42119a063)
-    [x] [Writing a long script](https://chatgpt.com/c/6801632f-5864-8003-b9a5-3144b0bf695a)
-[ ] Test time training (TTT)
-    [ ] Review current script
-    [ ] Add pre-training on the "train" split
+## Very Basic Examples
+
+If you're new to ARC AGI, read through these very simple examples:
+- [Domain Specific Language Approach = combine basic operations](https://chatgpt.com/share/6810cc59-c2c0-8003-ad6e-3c025c10224e)
+- [Neural Net Approach = train on examples](https://chatgpt.com/share/6810cc68-cf38-8003-aace-3630952bbeb6)
+- [LLM guided program search = write python solvers using LLMs](https://chatgpt.com/share/6810cc4c-e790-8003-8aac-b6f8ab2213e8)
 
 ## Scripts
 
