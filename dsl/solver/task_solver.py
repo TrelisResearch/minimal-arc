@@ -64,6 +64,20 @@ def solve_task(
     # Use a more reliable timeout approach
     end_time = start_time + timeout
     
+    # Check if we're running in a multiprocessing context
+    # If we are, we should disable parallel search to avoid nested parallelism
+    try:
+        import multiprocessing
+        current_process = multiprocessing.current_process()
+        if current_process.daemon:
+            # We're in a daemon process, so disable parallel search
+            parallel = False
+            if debug:
+                print("Running in daemon process, disabling parallel search")
+    except (ImportError, AttributeError):
+        # multiprocessing not available or we're not in a multiprocessing context
+        pass
+    
     # Generate and verify programs
     try:
         for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
@@ -112,6 +126,9 @@ def solve_task(
     except TimeoutException:
         if debug:
             print(f"Search timed out after {timeout} seconds")
+    except Exception as e:
+        if debug:
+            print(f"Unexpected error during search: {e}")
     
     elapsed_time = time.time() - start_time
     

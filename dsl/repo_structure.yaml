@@ -4,6 +4,8 @@
     type: file
   - path: /pyproject.toml
     type: file
+  - path: /results.json
+    type: file
   - path: /io
     type: directory
     contents:
@@ -28,6 +30,13 @@
       type: file
   - path: /__init__.py
     type: file
+  - path: /solver
+    type: directory
+    contents:
+    - path: /solver/task_solver.py
+      type: file
+    - path: /solver/__init__.py
+      type: file
   - path: /cli
     type: directory
     contents:
@@ -55,6 +64,8 @@
   - path: /results
     type: directory
     contents:
+    - path: /results/results.json
+      type: file
   - path: /test_tile_pattern.py
     type: file
   - path: /dsl_utils

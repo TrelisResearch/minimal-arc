@@ -61,6 +61,37 @@ def transpose_fn(grid: Grid) -> Grid:
     return Grid(grid.data.T)
 
 
+def flip_diag_fn(grid: Grid) -> Grid:
+    """Flip the grid along the main diagonal (top-left to bottom-right)."""
+    return Grid(np.transpose(grid.data))
+
+
+def flip_antidiag_fn(grid: Grid) -> Grid:
+    """Flip the grid along the anti-diagonal (top-right to bottom-left)."""
+    # First flip horizontally, then transpose
+    return Grid(np.transpose(np.fliplr(grid.data)))
+
+
+def shift_up_fn(grid: Grid) -> Grid:
+    """Shift the grid up by one cell (with wrap-around)."""
+    return Grid(np.roll(grid.data, -1, axis=0))
+
+
+def shift_down_fn(grid: Grid) -> Grid:
+    """Shift the grid down by one cell (with wrap-around)."""
+    return Grid(np.roll(grid.data, 1, axis=0))
+
+
+def shift_left_fn(grid: Grid) -> Grid:
+    """Shift the grid left by one cell (with wrap-around)."""
+    return Grid(np.roll(grid.data, -1, axis=1))
+
+
+def shift_right_fn(grid: Grid) -> Grid:
+    """Shift the grid right by one cell (with wrap-around)."""
+    return Grid(np.roll(grid.data, 1, axis=1))
+
+
 def color_mask_fn(grid: Grid, color: int) -> Grid:
     """Create a binary mask for a specific color."""
     mask = (grid.data == color).astype(np.int32)
@@ -390,6 +421,12 @@ ROT270 = Op("rot270", rot270_fn, Grid_T, Grid_T)
 FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
 FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
 TRANSPOSE = Op("transpose", transpose_fn, Grid_T, Grid_T)
+FLIP_DIAG = Op("flip_diag", flip_diag_fn, Grid_T, Grid_T)
+FLIP_ANTIDIAG = Op("flip_antidiag", flip_antidiag_fn, Grid_T, Grid_T)
+SHIFT_UP = Op("shift_up", shift_up_fn, Grid_T, Grid_T)
+SHIFT_DOWN = Op("shift_down", shift_down_fn, Grid_T, Grid_T)
+SHIFT_LEFT = Op("shift_left", shift_left_fn, Grid_T, Grid_T)
+SHIFT_RIGHT = Op("shift_right", shift_right_fn, Grid_T, Grid_T)
 OBJECTS = Op("objects", find_objects_fn, Grid_T, ObjList_T)
 BBOX = Op("bbox", get_bbox_fn, ObjList_T, Grid_T)
 TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
@@ -509,6 +546,8 @@ FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)
 ALL_PRIMITIVES = [
     # Basic operations
     ROT90, ROT180, ROT270, FLIP_H, FLIP_V, TRANSPOSE,
+    FLIP_DIAG, FLIP_ANTIDIAG,
+    SHIFT_UP, SHIFT_DOWN, SHIFT_LEFT, SHIFT_RIGHT,
     OBJECTS, BBOX, TILE_PATTERN,
     
     # Grounded color mask operations
@@ -540,32 +579,41 @@ ALL_PRIMITIVES = [
 def print_primitives_summary():
     """Print a summary of the available primitives by category."""
     categories = {
-        "Basic operations": 0,
-        "Color mask operations": 0,
-        "Tile operations": 0,
-        "Crop operations": 0,
-        "Replace color operations": 0,
-        "Flood fill operations": 0,
-        "Count color operations": 0
+        "Basic operations": [],
+        "Color mask operations": [],
+        "Tile operations": [],
+        "Crop operations": [],
+        "Replace color operations": [],
+        "Flood fill operations": [],
+        "Count color operations": []
     }
     
     for op in ALL_PRIMITIVES:
-        if op.name in ["rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", "objects", "bbox", "tile_pattern"]:
-            categories["Basic operations"] += 1
+        if op.name in ["rot90", "rot180", "rot270", "flip_h", "flip_v", "transpose", 
+                      "flip_diag", "flip_antidiag", "shift_up", "shift_down", "shift_left", 
+                      "shift_right", "objects", "bbox", "tile_pattern"]:
+            categories["Basic operations"].append(op)
         elif op.name.startswith("mask_c"):
-            categories["Color mask operations"] += 1
+            categories["Color mask operations"].append(op)
         elif op.name.startswith("tile_"):
-            categories["Tile operations"] += 1
+            categories["Tile operations"].append(op)
         elif op.name.startswith("crop_"):
-            categories["Crop operations"] += 1
+            categories["Crop operations"].append(op)
         elif op.name.startswith("replace_"):
-            categories["Replace color operations"] += 1
+            categories["Replace color operations"].append(op)
         elif op.name.startswith("fill_") or op.name.startswith("flood_"):
-            categories["Flood fill operations"] += 1
+            categories["Flood fill operations"].append(op)
         elif op.name.startswith("count_"):
-            categories["Count color operations"] += 1
+            categories["Count color operations"].append(op)
     
     print(f"Using {len(ALL_PRIMITIVES)} primitives:")
-    for category, count in categories.items():
-        if count > 0:
-            print(f"  - {category}: {count}")
+    for category, ops in categories.items():
+        if ops:
+            print(f"  - {category}: {len(ops)}")
+            # Print the CAPS names of the operations in this category
+            for op in ops:
+                # Find the variable name (in CAPS) for this operation
+                for var_name, var_value in globals().items():
+                    if var_name.isupper() and var_value is op:
+                        print(f"      {var_name}")
+                        break

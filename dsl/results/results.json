@@ -1,122 +1,142 @@
 [
   {
-    "task_id": "f3cdc58f",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "358ba94e",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "1da012fc",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
     "task_id": "66e6c45b",
-    "solved": false,
+    "solved": true,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "55059096",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "a04b2602",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": "Program(rot180, tile_2x2, crop_center_half)",
+    "elapsed_time": 0.048915863037109375
   },
   {
     "task_id": "0a1d4ef5",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000461101531982
   },
   {
     "task_id": "692cd3b6",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.00045895576477
   },
   {
-    "task_id": "963f59bc",
+    "task_id": "1da012fc",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "d37a1ef5",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000891923904419
   },
   {
     "task_id": "3194b014",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000244140625
   },
   {
-    "task_id": "c7d4e6ad",
+    "task_id": "963f59bc",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000065088272095
   },
   {
-    "task_id": "4b6b68e5",
+    "task_id": "d37a1ef5",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000078916549683
+  },
+  {
+    "task_id": "358ba94e",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.003809928894043
+  },
+  {
+    "task_id": "f3cdc58f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.000023126602173
   },
   {
     "task_id": "00576224",
     "solved": false,
     "correct": false,
-    "program": null
+    "program": null,
+    "elapsed_time": 3.0994415283203125e-05
+  },
+  {
+    "task_id": "55059096",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.000552892684937
+  },
+  {
+    "task_id": "4b6b68e5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.000386953353882
+  },
+  {
+    "task_id": "c7d4e6ad",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.000015258789062
+  },
+  {
+    "task_id": "a04b2602",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.001902103424072
   },
   {
     "task_id": "e9c9d9a1",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "770cc55f",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
-  },
-  {
-    "task_id": "1a2e2828",
-    "solved": false,
-    "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000173091888428
   },
   {
     "task_id": "7ee1c6ea",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000079870223999
   },
   {
     "task_id": "ef26cbf6",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000041961669922
   },
   {
     "task_id": "e9ac8c9e",
     "solved": false,
     "correct": false,
-    "error": "daemonic processes are not allowed to have children"
+    "program": null,
+    "elapsed_time": 15.000041961669922
+  },
+  {
+    "task_id": "1a2e2828",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.000699996948242
+  },
+  {
+    "task_id": "770cc55f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 15.00002408027649
   }
 ]

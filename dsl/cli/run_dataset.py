@@ -9,9 +9,8 @@ import sys
 import os
 import json
 from pathlib import Path
-from multiprocessing import Pool, cpu_count
+import multiprocessing as mp
 from functools import partial
-from tqdm import tqdm
 import numpy as np
 
 # Add the parent directory to the path so we can import our modules
@@ -19,84 +18,23 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from dsl.dsl_utils.primitives import ALL_PRIMITIVES, print_primitives_summary
 from dsl.dsl_utils.types import Grid
-from dsl.solver.task_solver import solve_task
 from dsl.io.loader import load_task, load_solution, load_train_pairs, load_test_input
-from dsl.io.visualizer import visualize_task, save_visualization
+from dsl.io.visualizer import visualize_task
+from dsl.parallel.job_queue import process_tasks_parallel
 
 
-def process_task(task_id, depth, timeout, data_path, save_dir, op_timeout):
+def save_visualization(task, prediction, save_dir, task_id):
     """
-    Process a single task.
+    Save a visualization of the task and prediction.
     
     Args:
+        task: The task data
+        prediction: The prediction grid
+        save_dir: Directory to save the visualization
         task_id: The task ID
-        depth: Maximum search depth
-        timeout: Search timeout in seconds
-        data_path: Path to the data directory
-        save_dir: Directory to save results
-        op_timeout: Timeout for individual operations in seconds
-        
-    Returns:
-        Dictionary with results
     """
-    try:
-        # Load the task
-        task = load_task(task_id, data_path)
-        
-        # Extract training pairs
-        train_pairs = load_train_pairs(task)
-        test_input = load_test_input(task)
-        
-        # Try to load the solution
-        solution = None
-        try:
-            solution_grid = load_solution(task_id, data_path)
-            solution = Grid(solution_grid)
-        except Exception:
-            pass
-        
-        # Solve the task using the unified solver
-        result = solve_task(
-            task_id=task_id,
-            train_pairs=train_pairs,
-            test_input=test_input,
-            depth=depth,
-            timeout=timeout,
-            op_timeout=op_timeout,
-            parallel=False,  # Don't use parallel within a process that's already parallelized
-            debug=False
-        )
-        
-        # Extract results
-        found_solution = result['solved']
-        valid_program = result['program']
-        prediction = result['prediction']
-        
-        # Check if the prediction matches the solution
-        correct = False
-        if solution is not None and prediction is not None:
-            correct = np.array_equal(prediction.data, solution.data)
-        
-        # Save visualization if requested
-        if save_dir and found_solution:
-            save_path = os.path.join(save_dir, f"{task_id}.png")
-            visualize_task(task, prediction, save_path)
-        
-        return {
-            'task_id': task_id,
-            'solved': found_solution,
-            'correct': correct,
-            'program': str(valid_program) if valid_program else None,
-            'elapsed_time': result['elapsed_time']
-        }
-    except Exception as e:
-        return {
-            'task_id': task_id,
-            'solved': False,
-            'correct': False,
-            'error': str(e),
-            'elapsed_time': 0
-        }
+    save_path = os.path.join(save_dir, f"{task_id}.png")
+    visualize_task(task, prediction, save_path)
 
 
 def main():
@@ -104,7 +42,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run the ARC DSL solver on a dataset')
     parser.add_argument('json_file', type=str, help='Path to the JSON file containing task IDs')
     parser.add_argument('--depth', type=int, default=4, help='Maximum search depth (default: 4)')
-    parser.add_argument('--timeout', type=float, default=15.0, help='Search timeout in seconds (default: 15.0)')
+    parser.add_argument('--timeout', type=float, default=3.0, help='Search timeout in seconds (default: 15.0)')
     parser.add_argument('--parallel', type=int, help='Number of parallel processes (default: CPU count - 1)')
     parser.add_argument('--data-path', type=str, help='Path to the data directory')
     parser.add_argument('--save-dir', type=str, help='Directory to save results')
@@ -136,7 +74,7 @@ def main():
     
     # Set up parallel processing
     if args.parallel is None:
-        num_processes = max(1, cpu_count() - 1)
+        num_processes = max(1, mp.cpu_count() - 1)
     else:
         num_processes = args.parallel
     
@@ -146,24 +84,30 @@ def main():
     if args.save_dir:
         os.makedirs(args.save_dir, exist_ok=True)
     
-    # Run tasks in parallel
-    with Pool(processes=num_processes) as pool:
-        # Create a partial function with fixed arguments
-        process_task_partial = partial(
-            process_task,
-            depth=args.depth,
-            timeout=args.timeout,
-            data_path=args.data_path,
-            save_dir=args.save_dir,
-            op_timeout=args.op_timeout
-        )
-        
-        # Map the function to the task IDs with a progress bar
-        results = list(tqdm(
-            pool.imap_unordered(process_task_partial, task_ids),
-            total=len(task_ids),
-            desc="Processing tasks"
-        ))
+    # Create partial functions for the loaders
+    task_loader = partial(load_task, data_path=args.data_path)
+    solution_loader = partial(load_solution, data_path=args.data_path)
+    train_pairs_loader = load_train_pairs
+    test_input_loader = load_test_input
+    
+    # Add debug flag
+    debug = True
+    
+    # Process tasks in parallel using the job queue
+    results = process_tasks_parallel(
+        task_ids=task_ids,
+        task_loader=task_loader,
+        solution_loader=solution_loader,
+        train_pairs_loader=train_pairs_loader,
+        test_input_loader=test_input_loader,
+        depth=args.depth,
+        timeout=args.timeout,
+        op_timeout=args.op_timeout,
+        num_processes=num_processes,
+        save_dir=args.save_dir,
+        visualizer=save_visualization if args.save_dir else None,
+        debug=debug
+    )
     
     # Count successful tasks
     solved_count = sum(1 for result in results if result['solved'])
