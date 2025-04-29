@@ -61,10 +61,20 @@ def solve_task(
     valid_program = None
     prediction = None
     
+    # Use a more reliable timeout approach
+    end_time = start_time + timeout
+    
     # Generate and verify programs
     try:
         for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
                                     parallel, num_processes):
+            # Check if we've exceeded the timeout
+            current_time = time.time()
+            if current_time > end_time:
+                if debug:
+                    print(f"Search timed out after {timeout} seconds")
+                break
+                
             try:
                 if verify(program, train_pairs, op_timeout=op_timeout):
                     valid_program = program
@@ -99,6 +109,9 @@ def solve_task(
     except KeyboardInterrupt:
         if debug:
             print("Search interrupted by user")
+    except TimeoutException:
+        if debug:
+            print(f"Search timed out after {timeout} seconds")
     
     elapsed_time = time.time() - start_time
     
