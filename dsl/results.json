@@ -4,70 +4,16 @@
     "solved": true,
     "correct": true,
     "program": "Program(rot180, tile_2x2, crop_center_half)",
-    "elapsed_time": 0.04961419105529785,
+    "elapsed_time": 0.05378890037536621,
     "search_exhausted": false,
     "search_timed_out": false
-  },
-  {
-    "task_id": "692cd3b6",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000210046768188,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "963f59bc",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.001804828643799,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "1da012fc",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.025593757629395,
-    "search_exhausted": false,
-    "search_timed_out": true
   },
   {
     "task_id": "d37a1ef5",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.000051259994507,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "358ba94e",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.015886068344116,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "00576224",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 0.027539968490600586,
-    "search_exhausted": false,
-    "search_timed_out": false
-  },
-  {
-    "task_id": "0a1d4ef5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.082376956939697,
+    "elapsed_time": 60.0028510093689,
     "search_exhausted": false,
     "search_timed_out": true
   },
@@ -76,34 +22,7 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.005379676818848,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "c7d4e6ad",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000109195709229,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "f3cdc58f",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.035048961639404,
-    "search_exhausted": false,
-    "search_timed_out": true
-  },
-  {
-    "task_id": "4b6b68e5",
-    "solved": false,
-    "correct": false,
-    "program": null,
-    "elapsed_time": 15.000223875045776,
+    "elapsed_time": 60.00337290763855,
     "search_exhausted": false,
     "search_timed_out": true
   },
@@ -112,52 +31,88 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.264259099960327,
+    "elapsed_time": 60.01330494880676,
     "search_exhausted": false,
     "search_timed_out": true
   },
   {
-    "task_id": "e9c9d9a1",
+    "task_id": "692cd3b6",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.002126216888428,
+    "elapsed_time": 60.02075409889221,
     "search_exhausted": false,
     "search_timed_out": true
   },
   {
-    "task_id": "a04b2602",
+    "task_id": "963f59bc",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.005097150802612,
+    "elapsed_time": 60.01050114631653,
     "search_exhausted": false,
     "search_timed_out": true
   },
   {
-    "task_id": "7ee1c6ea",
+    "task_id": "c7d4e6ad",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.000041961669922,
+    "elapsed_time": 60.00662708282471,
     "search_exhausted": false,
     "search_timed_out": true
   },
   {
-    "task_id": "ef26cbf6",
+    "task_id": "358ba94e",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.00085973739624,
+    "elapsed_time": 60.03933119773865,
     "search_exhausted": false,
     "search_timed_out": true
   },
   {
-    "task_id": "e9ac8c9e",
+    "task_id": "1da012fc",
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.002708911895752,
+    "elapsed_time": 60.071757078170776,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "00576224",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 0.009692907333374023,
+    "search_exhausted": false,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "f3cdc58f",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.09206509590149,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "4b6b68e5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.01240515708923,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "0a1d4ef5",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.285369873046875,
     "search_exhausted": false,
     "search_timed_out": true
   },
@@ -166,7 +121,34 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.001819133758545,
+    "elapsed_time": 46.857146978378296,
+    "search_exhausted": true,
+    "search_timed_out": false
+  },
+  {
+    "task_id": "ef26cbf6",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.00142216682434,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "e9ac8c9e",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.00004601478577,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "e9c9d9a1",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.01233386993408,
     "search_exhausted": false,
     "search_timed_out": true
   },
@@ -175,7 +157,25 @@
     "solved": false,
     "correct": false,
     "program": null,
-    "elapsed_time": 15.01404595375061,
+    "elapsed_time": 60.001060962677,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "7ee1c6ea",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.04525113105774,
+    "search_exhausted": false,
+    "search_timed_out": true
+  },
+  {
+    "task_id": "a04b2602",
+    "solved": false,
+    "correct": false,
+    "program": null,
+    "elapsed_time": 60.092447996139526,
     "search_exhausted": false,
     "search_timed_out": true
   }

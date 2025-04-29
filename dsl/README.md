@@ -73,8 +73,18 @@ The DSL includes a search algorithm that can find programs to solve ARC tasks:
 
 - **Iterative Deepening**: The search starts with simple programs (depth 1) and gradually increases complexity.
 - **Parallelization**: The search can utilize multiple CPU cores to speed up the process.
-- **Heuristics**: Shape-based heuristics guide the search toward promising programs.
+- **Search Termination**: The search stops as soon as a valid program is found that correctly solves all training examples. Test outputs are only used for evaluation after a solution is found, not to guide the search.
 - **Timeout Control**: A configurable timeout prevents excessive search time.
+
+### Heuristics and Pruning
+
+The search process uses several heuristics to guide and prune the search space:
+
+- **Type Checking**: Ensures operations have compatible input/output types (actively used).
+- **Symmetry Pruning**: Eliminates redundant operation sequences like consecutive involutions or full rotations (actively used).
+- **Shape Heuristic**: Uses input/output shapes to prioritize operations that are likely to be useful (actively used).
+- **Similarity Heuristic**: Implemented but not actively used in the main search process. Could be used with A* search.
+- **A* Search**: Implemented but not currently used in the main task solver. The system primarily relies on iterative deepening.
 
 ### Using Parallel Search
 
