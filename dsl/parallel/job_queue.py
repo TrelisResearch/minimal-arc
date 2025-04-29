@@ -240,7 +240,8 @@ def worker_process(
                 'program': str(valid_program) if valid_program else None,
                 'elapsed_time': elapsed_time,
                 'search_exhausted': search_exhausted,
-                'search_timed_out': search_timed_out
+                'search_timed_out': search_timed_out,
+                'visited_states': len(visited) if isinstance(visited, dict) else 'N/A'
             })
         except Exception as e:
             # Put an error result in the result queue
@@ -251,7 +252,8 @@ def worker_process(
                 'error': str(e),
                 'elapsed_time': 0,
                 'search_exhausted': False,
-                'search_timed_out': False
+                'search_timed_out': False,
+                'visited_states': 'N/A'
             })
 
 

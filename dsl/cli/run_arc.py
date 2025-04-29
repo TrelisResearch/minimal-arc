@@ -187,10 +187,45 @@ def main():
                 plt.tight_layout()
                 plt.show()
     else:
-        # Dataset mode - show summary statistics
+        # Dataset mode - show summary statistics and per-task results
         solved_count = sum(1 for result in results if result['solved'])
         correct_count = sum(1 for result in results if result.get('correct', False))
         
+        # Print per-task results
+        print("\nPer-task results:")
+        print("-" * 80)
+        print(f"{'Task ID':<12} {'Status':<20} {'Correct':<10} {'Time (s)':<10} {'States':<10} {'Program'}")
+        print("-" * 80)
+        
+        for result in results:
+            task_id = result['task_id']
+            
+            # Determine status
+            if result['solved']:
+                status = "Valid program found"
+            elif result.get('search_exhausted', False):
+                status = "Search exhausted"
+            elif result.get('search_timed_out', False):
+                status = "Timeout"
+            else:
+                status = "Failed"
+                
+            # Determine correctness
+            correct = "Yes" if result.get('correct', False) else "No" if result['solved'] else "N/A"
+            
+            # Get time and states
+            time_taken = f"{result.get('elapsed_time', 0):.2f}"
+            states = result.get('visited_states', 'N/A')
+            
+            # Get program (truncated if too long)
+            program = result.get('program', 'None')
+            if program and len(program) > 30:
+                program = program[:27] + "..."
+                
+            # Print the row
+            print(f"{task_id:<12} {status:<20} {correct:<10} {time_taken:<10} {states:<10} {program}")
+        
+        print("-" * 80)
         print(f"Results: {solved_count}/{len(task_ids)} tasks solved")
         print(f"Correct: {correct_count}/{len(task_ids)} predictions match solutions")
         
