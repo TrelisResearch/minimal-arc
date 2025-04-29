@@ -53,8 +53,9 @@ def solve_task(
     input_shape = train_pairs[0][0].shape
     output_shape = train_pairs[0][1].shape
     
-    # Extract training inputs for grid state memoization
+    # Extract training inputs and outputs for joint-example forward search
     train_inputs = [pair[0] for pair in train_pairs]
+    train_outputs = [pair[1] for pair in train_pairs]
     
     if debug:
         print(f"Input shape: {input_shape}, Output shape: {output_shape}")
@@ -93,8 +94,8 @@ def solve_task(
         visited = {}
         
         iterator = iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
-                                parallel, num_processes, train_inputs=train_pairs[0][0:1], op_timeout=op_timeout,
-                                visited=visited)
+                                parallel, num_processes, train_inputs=train_inputs, train_outputs=train_outputs, 
+                                op_timeout=op_timeout, visited=visited)
         
         while True:
             try:
@@ -120,6 +121,9 @@ def solve_task(
                     break
                     
                 try:
+                    # With joint-example forward search, we can skip verification for most programs
+                    # as they are already verified during the search process
+                    # However, we still need to verify to be absolutely sure
                     if verify(program, train_pairs, op_timeout=op_timeout):
                         valid_program = program
                         found_solution = True

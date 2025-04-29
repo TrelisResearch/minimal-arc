@@ -14,7 +14,7 @@ import numpy as np
 from ..dsl_utils.primitives import Op, ALL_PRIMITIVES, TILE_PATTERN
 from ..dsl_utils.program import Program
 from ..dsl_utils.types import Type, Grid, ObjList, Grid_T
-
+from .grid_signature import compute_grid_signature, is_signature_compatible
 
 class TimeoutException(Exception):
     """Exception raised when a timeout occurs."""
@@ -110,16 +110,34 @@ def shape_heuristic(prefix: List[Op], next_op: Op,
     Returns:
         True if the operation is likely to be useful, False otherwise
     """
+    # Depth of the current search (length of prefix)
+    depth = len(prefix)
+    
+    # If the output is the same shape as the input and we're at depth 1,
+    # only allow rotation, flip, transpose, and color operations
+    if depth == 1 and output_shape == input_shape:
+        allowed_ops = {
+            "rot90", "rot180", "rot270", 
+            "flip_h", "flip_v", "transpose", 
+            "flip_diag", "flip_antidiag",
+            "mask_c1", "mask_c2", "mask_c3",
+            "replace_0_to_1", "replace_1_to_2",
+            "hole_mask"
+        }
+        if next_op.name not in allowed_ops:
+            return False
+    
     # If the output is smaller than the input, prioritize operations that reduce size
     if output_shape[0] < input_shape[0] or output_shape[1] < input_shape[1]:
-        if next_op.name in ["crop"]:
+        if next_op.name in ["crop_center_half", "crop_center_third"]:
             return True
-        if len(prefix) > 0 and prefix[-1].name in ["crop"]:
+        if len(prefix) > 0 and prefix[-1].name.startswith("crop_"):
             return True
     
     # If the output is larger than the input, prioritize operations that increase size
     if output_shape[0] > input_shape[0] or output_shape[1] > input_shape[1]:
-        if next_op.name in ["tile", "tile_pattern"]:
+        if next_op.name in ["tile_2x2", "tile_3x3", "tile_pattern", 
+                           "shift_up_pad", "shift_down_pad", "shift_left", "shift_right"]:
             return True
     
     # Default: allow the operation
@@ -172,13 +190,62 @@ def compute_grid_hashes(program: Program, train_inputs: List[Grid], op_timeout: 
     return hashes
 
 
+def extend_with_op(prefix_states: List[Grid], target_states: List[Grid], op: Op, op_timeout: float = 0.25) -> Optional[List[Grid]]:
+    """
+    Extend a list of prefix states with an operation, checking compatibility with target states.
+    
+    Args:
+        prefix_states: List of current grid states (one per training example)
+        target_states: List of target grid states (one per training example)
+        op: The operation to apply
+        op_timeout: Timeout for the operation in seconds
+        
+    Returns:
+        List of new grid states if all examples survive, None if any example is pruned
+    """
+    new_states = []
+    
+    for i, (grid, target) in enumerate(zip(prefix_states, target_states)):
+        try:
+            with time_limit(op_timeout):
+                # Apply the operation to the current grid
+                new_grid = op.fn(grid)
+                
+                if new_grid is None:
+                    # Operation failed
+                    return None
+                
+                # Check if the shape is compatible with the target
+                if new_grid.shape != target.shape:
+                    # Shape mismatch, prune this branch
+                    return None
+                
+                # Compute signatures for early pruning
+                current_sig = compute_grid_signature(new_grid)
+                target_sig = compute_grid_signature(target)
+                
+                # Check if the signatures are compatible
+                if not is_signature_compatible(current_sig, target_sig):
+                    # Signatures are incompatible, prune this branch
+                    return None
+                
+                new_states.append(new_grid)
+        except (TimeoutException, Exception):
+            # Operation timed out or failed, prune this branch
+            return None
+    
+    return new_states
+
+
 def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
                      input_shape: Optional[Tuple[int, int]] = None,
                      output_shape: Optional[Tuple[int, int]] = None,
                      train_inputs: Optional[List[Grid]] = None,
+                     train_outputs: Optional[List[Grid]] = None,
                      visited: Optional[Dict[Tuple[bytes, ...], int]] = None,
                      op_timeout: float = 0.25,
-                     stats: Optional[Dict[str, int]] = None):
+                     stats: Optional[Dict[str, int]] = None,
+                     prefix_states: Optional[List[Grid]] = None):
     """
     Enumerate all valid programs with the given prefix and remaining depth.
     
@@ -189,9 +256,11 @@ def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
         input_shape: Shape of the input grid (optional)
         output_shape: Shape of the output grid (optional)
         train_inputs: List of training input grids (optional)
+        train_outputs: List of training output grids (optional)
         visited: Dictionary of visited grid states (optional)
         op_timeout: Timeout for individual operations in seconds
         stats: Dictionary to track statistics (optional)
+        prefix_states: Current grid states for each training example (optional)
         
     Yields:
         Valid Program instances
@@ -203,6 +272,38 @@ def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
     if remaining == 0:
         yield Program(prefix)
         return
+    
+    # Initialize prefix_states if this is the first call
+    if prefix_states is None and train_inputs and train_outputs:
+        # Start with the initial training inputs
+        prefix_states = train_inputs.copy()
+        
+        # If we already have operations in the prefix, apply them to get the current states
+        if prefix:
+            program = Program(prefix)
+            try:
+                new_states = []
+                for input_grid in train_inputs:
+                    try:
+                        with time_limit(op_timeout):
+                            output_grid = program.run(input_grid, op_timeout=op_timeout)
+                            if output_grid is not None:
+                                new_states.append(output_grid)
+                            else:
+                                # Program failed to run
+                                return
+                    except (TimeoutException, Exception):
+                        # Program timed out or failed
+                        return
+                
+                if len(new_states) == len(train_inputs):
+                    prefix_states = new_states
+                else:
+                    # Some executions failed
+                    return
+            except Exception:
+                # If there's any error, just skip this program
+                return
     
     # Try each primitive as the next operation
     for op in primitives:
@@ -220,35 +321,74 @@ def enumerate_programs(primitives: List[Op], prefix: List[Op], remaining: int,
         if not program.is_compatible(Grid_T, Grid_T):
             continue
         
-        # If we have training inputs, check if this program produces unique grid states
-        if train_inputs and visited is not None:
-            current_length = len(new_prefix)
+        # If we have training inputs and outputs, use joint-example forward search
+        if train_inputs and train_outputs and prefix_states:
+            # Extend the prefix states with the new operation
+            new_states = extend_with_op(prefix_states, train_outputs, op, op_timeout)
             
-            try:
-                # Compute grid state hashes for this program
-                grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
-                hash_tuple = tuple(grid_hashes)
-                
-                # Skip if any execution failed
-                if None in grid_hashes or b'failed' in grid_hashes:
-                    continue
-                
-                # Check if we've seen this grid state before with a shorter or equal program
-                if hash_tuple in visited and visited[hash_tuple] < current_length:
-                    # Only prune if we've seen this state with a SHORTER program
-                    # This is less aggressive than the previous approach
-                    stats["pruned"] += 1
-                    continue
-                
-                # Otherwise, record this grid state
-                visited[hash_tuple] = current_length
-            except Exception:
-                # If there's any error, just continue with the next operation
+            # If any example was pruned, skip this operation
+            if new_states is None:
+                stats["pruned"] += 1
                 continue
-        
-        # Recursive enumeration
-        yield from enumerate_programs(primitives, new_prefix, remaining - 1, 
-                                     input_shape, output_shape, train_inputs, visited, op_timeout, stats)
+            
+            # If we have a visited dictionary, check for duplicate grid states
+            if visited is not None:
+                current_length = len(new_prefix)
+                
+                try:
+                    # Compute grid state hashes
+                    grid_hashes = [hash_grid(grid) for grid in new_states]
+                    hash_tuple = tuple(grid_hashes)
+                    
+                    # Check if we've seen this grid state before with a shorter or equal program
+                    if hash_tuple in visited and visited[hash_tuple] < current_length:
+                        # Only prune if we've seen this state with a SHORTER program
+                        stats["pruned"] += 1
+                        continue
+                    
+                    # Otherwise, record this grid state
+                    visited[hash_tuple] = current_length
+                except Exception:
+                    # If there's any error, just continue with the next operation
+                    continue
+            
+            # Recursive enumeration with the new states
+            yield from enumerate_programs(primitives, new_prefix, remaining - 1, 
+                                        input_shape, output_shape, train_inputs, train_outputs, 
+                                        visited, op_timeout, stats, new_states)
+        else:
+            # Fall back to the original approach if we don't have training data
+            # If we have training inputs, check if this program produces unique grid states
+            if train_inputs and visited is not None:
+                current_length = len(new_prefix)
+                
+                try:
+                    # Compute grid state hashes for this program
+                    grid_hashes = compute_grid_hashes(program, train_inputs, op_timeout)
+                    
+                    # Skip if any execution failed
+                    if None in grid_hashes or b'failed' in grid_hashes:
+                        continue
+                    
+                    # Create a tuple of hashes for all training inputs
+                    hash_tuple = tuple(grid_hashes)
+                    
+                    # Check if we've seen this grid state before with a shorter or equal program
+                    if hash_tuple in visited and visited[hash_tuple] < current_length:
+                        # Only prune if we've seen this state with a SHORTER program
+                        stats["pruned"] += 1
+                        continue
+                    
+                    # Otherwise, record this grid state
+                    visited[hash_tuple] = current_length
+                except Exception:
+                    # If there's any error, just continue with the next operation
+                    continue
+            
+            # Recursive enumeration
+            yield from enumerate_programs(primitives, new_prefix, remaining - 1, 
+                                        input_shape, output_shape, train_inputs, train_outputs, 
+                                        visited, op_timeout, stats)
 
 
 def get_optimal_process_count():
@@ -443,6 +583,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                   parallel: bool = False,
                   num_processes: Optional[int] = None,
                   train_inputs: Optional[List[Grid]] = None,
+                  train_outputs: Optional[List[Grid]] = None,
                   op_timeout: float = 0.25,
                   visited: Optional[Dict[Tuple[bytes, ...], int]] = None) -> Iterator[Tuple[Program, Dict[str, Any]]]:
     """
@@ -457,6 +598,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
         parallel: Whether to use parallel search
         num_processes: Number of processes to use for parallel search (optional)
         train_inputs: List of training input grids (optional)
+        train_outputs: List of training output grids (optional)
         op_timeout: Timeout for individual operations in seconds
         visited: Dictionary to track visited grid states (optional)
         
@@ -502,7 +644,7 @@ def iter_deepening(primitives: List[Op], max_depth: int,
                     # Use sequential search for depth 1 or if parallel is disabled
                     program_count = 0
                     for program in enumerate_programs(primitives, [], depth, input_shape, output_shape, 
-                                                     train_inputs, visited, op_timeout, depth_stats):
+                                                     train_inputs, train_outputs, visited, op_timeout, depth_stats):
                         program_count += 1
                         yield program, {"search_exhausted": False, "search_timed_out": False}
                     

@@ -33,7 +33,7 @@ class Op:
 
 def rot90_fn(grid: Grid) -> Grid:
     """Rotate the grid 90 degrees clockwise."""
-    return Grid(np.rot90(grid.data, k=1, axes=(1, 0)))
+    return Grid(np.rot90(grid.data, k=1))  # default axes
 
 
 def rot180_fn(grid: Grid) -> Grid:
@@ -43,7 +43,7 @@ def rot180_fn(grid: Grid) -> Grid:
 
 def rot270_fn(grid: Grid) -> Grid:
     """Rotate the grid 270 degrees clockwise (90 degrees counterclockwise)."""
-    return Grid(np.rot90(grid.data, k=3, axes=(1, 0)))
+    return Grid(np.rot90(grid.data, k=3))  # k=3 not 1
 
 
 def flip_h_fn(grid: Grid) -> Grid:
@@ -90,6 +90,18 @@ def shift_left_fn(grid: Grid) -> Grid:
 def shift_right_fn(grid: Grid) -> Grid:
     """Shift the grid right by one cell (with wrap-around)."""
     return Grid(np.roll(grid.data, 1, axis=1))
+
+
+def shift_up_pad(g):
+    """Shift the grid up by one cell (with zero-padding)."""
+    z = np.zeros_like(g.data)
+    z[:-1, :] = g.data[1:, :]
+    return Grid(z)
+
+
+def shift_down_pad(g):
+    """Shift the grid down by one cell (with zero-padding)."""
+    return shift_up_pad(Grid(np.flipud(g.data)))
 
 
 def color_mask_fn(grid: Grid, color: int) -> Grid:
@@ -143,21 +155,26 @@ def fill_holes_fn(grid: Grid) -> Grid:
     
     return Grid(filled)
 
+
 def fill_background_0_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 0."""
     return _fill_background(grid, 0)
+
 
 def fill_background_1_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 1."""
     return _fill_background(grid, 1)
 
+
 def fill_background_2_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 2."""
     return _fill_background(grid, 2)
 
+
 def fill_background_3_fn(grid: Grid) -> Grid:
     """Fill the background (connected to border) with color 3."""
     return _fill_background(grid, 3)
+
 
 def _fill_background(grid: Grid, color: int) -> Grid:
     """
@@ -199,6 +216,7 @@ def _fill_background(grid: Grid, color: int) -> Grid:
         queue.append((r, c+1))
     
     return result
+
 
 def flood_object_fn(grid: Grid) -> Grid:
     """
@@ -414,166 +432,98 @@ def count_color_fn(grid: Grid, color: int) -> int:
     return np.sum(grid.data == color).item()
 
 
+def hole_mask(g):
+    """Create a mask of holes (enclosed regions of zeros) in the grid."""
+    h, w = g.shape
+    mask = np.pad((g.data != 0), 1)          # boolean
+    q = deque([(0, 0)])
+    while q:
+        r, c = q.popleft()
+        if 0 <= r < h + 2 and 0 <= c < w + 2 and mask[r, c] == 0:
+            mask[r, c] = -1
+            q.extend([(r-1,c), (r+1,c), (r,c-1), (r,c+1)])
+    holes = (mask[1:-1, 1:-1] == 0).astype(int)
+    return Grid(holes)
+
+
 # Define the basic operations
 ROT90 = Op("rot90", rot90_fn, Grid_T, Grid_T)
 ROT180 = Op("rot180", rot180_fn, Grid_T, Grid_T, commutes_with={"rot180"})
 ROT270 = Op("rot270", rot270_fn, Grid_T, Grid_T)
-FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
-FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
+FLIP_H = Op("flip_h", flip_h_fn, Grid_T, Grid_T, commutes_with={"flip_v"})
+FLIP_V = Op("flip_v", flip_v_fn, Grid_T, Grid_T, commutes_with={"flip_h"})
 TRANSPOSE = Op("transpose", transpose_fn, Grid_T, Grid_T)
 FLIP_DIAG = Op("flip_diag", flip_diag_fn, Grid_T, Grid_T)
 FLIP_ANTIDIAG = Op("flip_antidiag", flip_antidiag_fn, Grid_T, Grid_T)
+
+# Shift operations
 SHIFT_UP = Op("shift_up", shift_up_fn, Grid_T, Grid_T)
 SHIFT_DOWN = Op("shift_down", shift_down_fn, Grid_T, Grid_T)
-SHIFT_LEFT = Op("shift_left", shift_left_fn, Grid_T, Grid_T)
-SHIFT_RIGHT = Op("shift_right", shift_right_fn, Grid_T, Grid_T)
+SHIFT_LEFT = Op("shift_left", shift_left_fn, Grid_T, Grid_T, commutes_with={"shift_right"})
+SHIFT_RIGHT = Op("shift_right", shift_right_fn, Grid_T, Grid_T, commutes_with={"shift_left"})
+
+# Zero-padded shift operations
+SHIFT_UP_PAD = Op("shift_up_pad", shift_up_pad, Grid_T, Grid_T)
+SHIFT_DOWN_PAD = Op("shift_down_pad", shift_down_pad, Grid_T, Grid_T)
+
+# Hole mask operation
+HOLE_MASK = Op("hole_mask", hole_mask, Grid_T, Grid_T)
+
+# Color mask operations
+MASK_C_1 = Op("mask_c1", lambda g: color_mask_fn(g, 1), Grid_T, Grid_T)
+MASK_C_2 = Op("mask_c2", lambda g: color_mask_fn(g, 2), Grid_T, Grid_T)
+MASK_C_3 = Op("mask_c3", lambda g: color_mask_fn(g, 3), Grid_T, Grid_T)
+
+# Tile operations
+TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
+TILE_3x3 = Op("tile_3x3", lambda g: tile_fn(g, 3, 3), Grid_T, Grid_T)
+TILE_2x2 = Op("tile_2x2", lambda g: tile_fn(g, 2, 2), Grid_T, Grid_T)
+
+# Crop operations
+CROP_CENTER_HALF = Op("crop_center_half", lambda g: crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2), Grid_T, Grid_T)
+CROP_CENTER_THIRD = Op("crop_center_third", lambda g: crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3), Grid_T, Grid_T)
+
+# Replace color operations
+REPLACE_0_TO_1 = Op("replace_0_to_1", lambda g: replace_color_fn(g, 0, 1), Grid_T, Grid_T)
+REPLACE_1_TO_2 = Op("replace_1_to_2", lambda g: replace_color_fn(g, 1, 2), Grid_T, Grid_T)
+
+# Flood fill operations
+FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)
+FILL_BACKGROUND_0 = Op("fill_background_0", fill_background_0_fn, Grid_T, Grid_T)
+
+# Object operations
 OBJECTS = Op("objects", find_objects_fn, Grid_T, ObjList_T)
 BBOX = Op("bbox", get_bbox_fn, ObjList_T, Grid_T)
-TILE_PATTERN = Op("tile_pattern", tile_pattern_fn, Grid_T, Grid_T)
 
-# Pre-ground parametric primitives into concrete, argument-free ops
-
-# Color mask operations for colors 0-9
-def mask_c0_fn(g): return color_mask_fn(g, 0)
-def mask_c1_fn(g): return color_mask_fn(g, 1)
-def mask_c2_fn(g): return color_mask_fn(g, 2)
-def mask_c3_fn(g): return color_mask_fn(g, 3)
-def mask_c4_fn(g): return color_mask_fn(g, 4)
-def mask_c5_fn(g): return color_mask_fn(g, 5)
-def mask_c6_fn(g): return color_mask_fn(g, 6)
-def mask_c7_fn(g): return color_mask_fn(g, 7)
-def mask_c8_fn(g): return color_mask_fn(g, 8)
-def mask_c9_fn(g): return color_mask_fn(g, 9)
-
-MASK_C_0 = Op("mask_c0", mask_c0_fn, Grid_T, Grid_T)
-MASK_C_1 = Op("mask_c1", mask_c1_fn, Grid_T, Grid_T)
-MASK_C_2 = Op("mask_c2", mask_c2_fn, Grid_T, Grid_T)
-MASK_C_3 = Op("mask_c3", mask_c3_fn, Grid_T, Grid_T)
-MASK_C_4 = Op("mask_c4", mask_c4_fn, Grid_T, Grid_T)
-MASK_C_5 = Op("mask_c5", mask_c5_fn, Grid_T, Grid_T)
-MASK_C_6 = Op("mask_c6", mask_c6_fn, Grid_T, Grid_T)
-MASK_C_7 = Op("mask_c7", mask_c7_fn, Grid_T, Grid_T)
-MASK_C_8 = Op("mask_c8", mask_c8_fn, Grid_T, Grid_T)
-MASK_C_9 = Op("mask_c9", mask_c9_fn, Grid_T, Grid_T)
-
-# Tile operations for common sizes
-def tile_2x2_fn(g): return tile_fn(g, 2, 2)
-def tile_2x3_fn(g): return tile_fn(g, 2, 3)
-def tile_3x2_fn(g): return tile_fn(g, 3, 2)
-def tile_3x3_fn(g): return tile_fn(g, 3, 3)
-def tile_4x4_fn(g): return tile_fn(g, 4, 4)
-
-TILE_2x2 = Op("tile_2x2", tile_2x2_fn, Grid_T, Grid_T)
-TILE_2x3 = Op("tile_2x3", tile_2x3_fn, Grid_T, Grid_T)
-TILE_3x2 = Op("tile_3x2", tile_3x2_fn, Grid_T, Grid_T)
-TILE_3x3 = Op("tile_3x3", tile_3x3_fn, Grid_T, Grid_T)
-TILE_4x4 = Op("tile_4x4", tile_4x4_fn, Grid_T, Grid_T)
-
-# Crop operations for different regions
-# Center crops
-def crop_center_half_fn(g): return crop_fn(g, g.shape[0]//4, g.shape[1]//4, g.shape[0]//2, g.shape[1]//2)
-def crop_center_third_fn(g): return crop_fn(g, g.shape[0]//3, g.shape[1]//3, g.shape[0]//3, g.shape[1]//3)
-
-CROP_CENTER_HALF = Op("crop_center_half", crop_center_half_fn, Grid_T, Grid_T)
-CROP_CENTER_THIRD = Op("crop_center_third", crop_center_third_fn, Grid_T, Grid_T)
-
-# Corner crops
-def crop_tl_half_fn(g): return crop_fn(g, 0, 0, g.shape[0]//2, g.shape[1]//2)
-def crop_tr_half_fn(g): return crop_fn(g, 0, g.shape[1]//2, g.shape[0]//2, g.shape[1]//2)
-def crop_bl_half_fn(g): return crop_fn(g, g.shape[0]//2, 0, g.shape[0]//2, g.shape[1]//2)
-def crop_br_half_fn(g): return crop_fn(g, g.shape[0]//2, g.shape[1]//2, g.shape[0]//2, g.shape[1]//2)
-
-# CROP_TL_HALF = Op("crop_tl_half", crop_tl_half_fn, Grid_T, Grid_T)
-# CROP_TR_HALF = Op("crop_tr_half", crop_tr_half_fn, Grid_T, Grid_T)
-# CROP_BL_HALF = Op("crop_bl_half", crop_bl_half_fn, Grid_T, Grid_T)
-# CROP_BR_HALF = Op("crop_br_half", crop_br_half_fn, Grid_T, Grid_T)
-
-# Replace color operations for common color pairs
-def replace_0_to_1_fn(g): return replace_color_fn(g, 0, 1)
-def replace_1_to_2_fn(g): return replace_color_fn(g, 1, 2)
-# def replace_2_to_3_fn(g): return replace_color_fn(g, 2, 3)
-# def replace_3_to_4_fn(g): return replace_color_fn(g, 3, 4)
-# def replace_4_to_5_fn(g): return replace_color_fn(g, 4, 5)
-# def replace_5_to_6_fn(g): return replace_color_fn(g, 5, 6)
-# def replace_6_to_7_fn(g): return replace_color_fn(g, 6, 7)
-# def replace_7_to_8_fn(g): return replace_color_fn(g, 7, 8)
-# def replace_8_to_9_fn(g): return replace_color_fn(g, 8, 9)
-# def replace_9_to_1_fn(g): return replace_color_fn(g, 9, 1)
-
-REPLACE_0_TO_1 = Op("replace_0_to_1", replace_0_to_1_fn, Grid_T, Grid_T)
-REPLACE_1_TO_2 = Op("replace_1_to_2", replace_1_to_2_fn, Grid_T, Grid_T)
-# REPLACE_2_TO_3 = Op("replace_2_to_3", replace_2_to_3_fn, Grid_T, Grid_T)
-# REPLACE_3_TO_4 = Op("replace_3_to_4", replace_3_to_4_fn, Grid_T, Grid_T)
-# REPLACE_4_TO_5 = Op("replace_4_to_5", replace_4_to_5_fn, Grid_T, Grid_T)
-# REPLACE_5_TO_6 = Op("replace_5_to_6", replace_5_to_6_fn, Grid_T, Grid_T)
-# REPLACE_6_TO_7 = Op("replace_6_to_7", replace_6_to_7_fn, Grid_T, Grid_T)
-# REPLACE_7_TO_8 = Op("replace_7_to_8", replace_7_to_8_fn, Grid_T, Grid_T)
-# REPLACE_8_TO_9 = Op("replace_8_to_9", replace_8_to_9_fn, Grid_T, Grid_T)
-# REPLACE_9_TO_1 = Op("replace_9_to_1", replace_9_to_1_fn, Grid_T, Grid_T)
-
-# More efficient flood fill operations
-FILL_HOLES = Op("fill_holes", fill_holes_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_0 = Op("fill_background_0", fill_background_0_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_1 = Op("fill_background_1", fill_background_1_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_2 = Op("fill_background_2", fill_background_2_fn, Grid_T, Grid_T)
-FILL_BACKGROUND_3 = Op("fill_background_3", fill_background_3_fn, Grid_T, Grid_T)
-FLOOD_OBJECT = Op("flood_object", flood_object_fn, Grid_T, Grid_T)
-
-# Count color operations
-# def count_c0_fn(g): return count_color_fn(g, 0)
-# def count_c1_fn(g): return count_color_fn(g, 1)
-# def count_c2_fn(g): return count_color_fn(g, 2)
-# def count_c3_fn(g): return count_color_fn(g, 3)
-# def count_c4_fn(g): return count_color_fn(g, 4)
-# def count_c5_fn(g): return count_color_fn(g, 5)
-# def count_c6_fn(g): return count_color_fn(g, 6)
-# def count_c7_fn(g): return count_color_fn(g, 7)
-# def count_c8_fn(g): return count_color_fn(g, 8)
-# def count_c9_fn(g): return count_color_fn(g, 9)
-
-# COUNT_C_0 = Op("count_c0", count_c0_fn, Grid_T, Int_T)
-# COUNT_C_1 = Op("count_c1", count_c1_fn, Grid_T, Int_T)
-# COUNT_C_2 = Op("count_c2", count_c2_fn, Grid_T, Int_T)
-# COUNT_C_3 = Op("count_c3", count_c3_fn, Grid_T, Int_T)
-# COUNT_C_4 = Op("count_c4", count_c4_fn, Grid_T, Int_T)
-# COUNT_C_5 = Op("count_c5", count_c5_fn, Grid_T, Int_T)
-# COUNT_C_6 = Op("count_c6", count_c6_fn, Grid_T, Int_T)
-# COUNT_C_7 = Op("count_c7", count_c7_fn, Grid_T, Int_T)
-# COUNT_C_8 = Op("count_c8", count_c8_fn, Grid_T, Int_T)
-# COUNT_C_9 = Op("count_c9", count_c9_fn, Grid_T, Int_T)
-
-# List of all primitives - replace with the grounded list
+# List of all primitives
 ALL_PRIMITIVES = [
-    # Basic operations
-    ROT90, ROT180, ROT270, FLIP_H, FLIP_V, TRANSPOSE,
+    # geometry
+    ROT90, ROT180, ROT270,
+    FLIP_H, FLIP_V, TRANSPOSE,
     FLIP_DIAG, FLIP_ANTIDIAG,
-    SHIFT_UP, SHIFT_DOWN, SHIFT_LEFT, SHIFT_RIGHT,
-    OBJECTS, BBOX, TILE_PATTERN,
-    
-    # Grounded color mask operations
-    MASK_C_0, MASK_C_1, MASK_C_2, MASK_C_3, MASK_C_4,
-    MASK_C_5, MASK_C_6, MASK_C_7, MASK_C_8, MASK_C_9,
-    
-    # Grounded tile operations
-    TILE_2x2, TILE_2x3, TILE_3x2, TILE_3x3, TILE_4x4,
-    
-    # Grounded crop operations
+
+    # positional shifts (pad version)
+    SHIFT_UP_PAD, SHIFT_DOWN_PAD, SHIFT_LEFT, SHIFT_RIGHT,
+
+    # size transforms
+    TILE_PATTERN, TILE_3x3, TILE_2x2,
     CROP_CENTER_HALF, CROP_CENTER_THIRD,
-    # CROP_TL_HALF, CROP_TR_HALF, CROP_BL_HALF, CROP_BR_HALF,
-    
-    # Grounded replace color operations
-    REPLACE_0_TO_1,  # Background to color 1
-    REPLACE_1_TO_2,  # Swap non-zero colors
-    # REPLACE_2_TO_3, REPLACE_3_TO_4, REPLACE_4_TO_5,
-    # REPLACE_5_TO_6, REPLACE_6_TO_7, REPLACE_7_TO_8, REPLACE_8_TO_9, REPLACE_9_TO_1,
-    
-    # More efficient flood fill operations
-    FILL_HOLES, FILL_BACKGROUND_0, FILL_BACKGROUND_1, FILL_BACKGROUND_2, FILL_BACKGROUND_3,
-    FLOOD_OBJECT,
-    
-    # COUNT_C_0, COUNT_C_1, COUNT_C_2, COUNT_C_3, COUNT_C_4,
-    # COUNT_C_5, COUNT_C_6, COUNT_C_7, COUNT_C_8, COUNT_C_9
+
+    # colour transforms
+    MASK_C_1, MASK_C_2, MASK_C_3,          # skip mask-0 for now
+    REPLACE_0_TO_1, REPLACE_1_TO_2,
+    HOLE_MASK,
+
+    # flood-fill helpers (trimmed)
+    FLOOD_OBJECT, FILL_BACKGROUND_0,
+
+    # object ops
+    OBJECTS, BBOX
 ]
+
+# Assert the length of ALL_PRIMITIVES is exactly 27
+assert len(ALL_PRIMITIVES) == 27
+print(f"Length of ALL_PRIMITIVES: {len(ALL_PRIMITIVES)}")
 
 # Print summary of primitives for debugging
 def print_primitives_summary():
