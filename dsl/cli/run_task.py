@@ -268,6 +268,10 @@ def main():
             
             # Display the solution if available
             if solution_data is not None:
+                # If solution has an extra dimension (e.g., (1, 4, 4)), remove it
+                if solution_data.ndim > 2 and solution_data.shape[0] == 1:
+                    solution_data = solution_data[0]
+                
                 axs[-1][2].imshow(solution_data, interpolation='nearest', vmin=0, vmax=9, cmap='tab10')
                 axs[-1][2].set_title("Test Solution")
                 axs[-1][2].axis('off')
@@ -277,6 +281,7 @@ def main():
                     print("Prediction matches solution!")
                 else:
                     print("Prediction does not match solution")
+                    print(f"Prediction shape: {prediction_data.shape}, Solution shape: {solution_data.shape}")
             
             # Add grid lines for test
             for ax in axs[-1][:2]:
