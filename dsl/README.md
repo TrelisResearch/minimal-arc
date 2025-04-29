@@ -6,7 +6,8 @@ A minimal DSL (Domain-Specific Language) implementation for solving ARC (Abstrac
 
 1. Primitives must be unary, i.e. you must define a set of operations on the input grid that ONLY require the input grid to be passed. What the operation does (rotate, flip, flood fill) should be entirely described by the oepration. Often this means creating multiple versions of one operation (e.g. a flood fill operation for each of ten colours).
 2. You don't want too many primitive operations as that increases the search space. Ideally you want operations to be fairly specific - not just have a fill operation for each individual position, but some general fills, e.g. border fill. AT THIS POINT, YOU SHOULD BE ABLE TO SOLVE AT LEAST ONE MIT-EASY PROBLEM.
-3. ADD HASHES FOR OUTPUTS/INTERMEDIATE STATES ALREADY VISITED, SO THAT THOSE ARE PRUNED.
+3. ADD HASHES FOR OUTPUTS/INTERMEDIATE STATES ALREADY VISITED, SO THAT THOSE ARE PRUNED. (Memoisation).
+4. Stop search early if an intermediate state is reached that will not be able to reach the output within the remaining depth. (e.g. intermediate grid has more colours compared to output than can be removed with primative operations).
 
 ## Quick Start
 
@@ -20,7 +21,7 @@ uv sync # if cloning the repo
 uv run cli/run_task.py 66e6c45b --depth 4 --show --data-path ../arc-data-cleaned
 
 # Run on a dataset
-uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 30 --save-dir results --data-path ../arc-data-cleaned
+uv run cli/run_dataset.py ../arc-data/mit-easy.json --depth 4 --timeout 300 --save-dir results --data-path ../arc-data-cleaned
 ```
 
 ## Command Line Options
@@ -38,7 +39,7 @@ Options:
 - `--save PATH`: Save visualization to file
 - `--data-path PATH`: Path to the data directory
 - `--parallel`: Use parallel search (default: True)
-- `--num-processes INT`: Number of processes to use (default: CPU count - 1)
+- `--num-processes INT`: Number of processes to use (default: CPU count - 1) # that's cpu count minus one.
 - `--op-timeout FLOAT`: Timeout for individual operations in seconds (default: 0.25)
 - `--debug`: Print debug information
 

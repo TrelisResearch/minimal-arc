@@ -53,6 +53,9 @@ def solve_task(
     input_shape = train_pairs[0][0].shape
     output_shape = train_pairs[0][1].shape
     
+    # Extract training inputs for grid state memoization
+    train_inputs = [pair[0] for pair in train_pairs]
+    
     if debug:
         print(f"Input shape: {input_shape}, Output shape: {output_shape}")
         print(f"Searching for programs with max depth {depth}...")
@@ -86,47 +89,68 @@ def solve_task(
     
     # Generate and verify programs
     try:
-        for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
-                                    parallel, num_processes):
-            # Check if we've exceeded the timeout
-            current_time = time.time()
-            if current_time > end_time:
-                if debug:
-                    print(f"Search timed out after {timeout} seconds")
-                search_timed_out = True
-                break
-                
+        iterator = iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout, 
+                                parallel, num_processes, train_inputs, op_timeout)
+        
+        while True:
             try:
-                if verify(program, train_pairs, op_timeout=op_timeout):
-                    valid_program = program
-                    found_solution = True
-                    
-                    if debug:
-                        print(f"Found valid program: {program}")
-                    
-                    # Generate prediction for the test input
-                    try:
-                        prediction = program.run(test_input, op_timeout=op_timeout)
-                        if debug and prediction is not None:
-                            print(f"Generated prediction for test input")
-                        elif debug:
-                            print(f"Failed to generate prediction for test input")
-                    except TimeoutException:
-                        if debug:
-                            print("Operation timed out during prediction")
-                    except Exception as e:
-                        if debug:
-                            print(f"Error during prediction: {e}")
-                    
+                result = next(iterator)
+                program, metadata = result
+                
+                # Check if this is a status update rather than a program
+                if program is None:
+                    search_exhausted = metadata.get("search_exhausted", False)
+                    search_timed_out = metadata.get("search_timed_out", False)
+                    if search_exhausted and debug:
+                        print(f"Search space exhausted (all programs up to depth {depth} tried)")
+                    if search_timed_out and debug:
+                        print(f"Search timed out after {timeout} seconds")
                     break
-            except TimeoutException:
-                if debug:
-                    print(f"Program timed out during verification: {program}")
-                continue
-            except Exception as e:
-                if debug:
-                    print(f"Error during verification: {e}")
-                continue
+                
+                # Check if we've exceeded the timeout
+                current_time = time.time()
+                if current_time > end_time:
+                    if debug:
+                        print(f"Search timed out after {timeout} seconds")
+                    search_timed_out = True
+                    break
+                    
+                try:
+                    if verify(program, train_pairs, op_timeout=op_timeout):
+                        valid_program = program
+                        found_solution = True
+                        
+                        if debug:
+                            print(f"Found valid program: {program}")
+                        
+                        # Generate prediction for the test input
+                        try:
+                            prediction = program.run(test_input, op_timeout=op_timeout)
+                            if debug and prediction is not None:
+                                print(f"Generated prediction for test input")
+                            elif debug:
+                                print(f"Failed to generate prediction for test input")
+                        except TimeoutException:
+                            if debug:
+                                print("Operation timed out during prediction")
+                        except Exception as e:
+                            if debug:
+                                print(f"Error during prediction: {e}")
+                        
+                        break
+                except TimeoutException:
+                    if debug:
+                        print(f"Program timed out during verification: {program}")
+                    continue
+                except Exception as e:
+                    if debug:
+                        print(f"Error during verification: {e}")
+                    continue
+            
+            except StopIteration:
+                # End of iterator
+                break
+    
     except KeyboardInterrupt:
         if debug:
             print("Search interrupted by user")
@@ -134,11 +158,6 @@ def solve_task(
         if debug:
             print(f"Search timed out after {timeout} seconds")
         search_timed_out = True
-    except StopIteration:
-        # This means the search space was exhausted
-        if debug:
-            print("Search space exhausted (all programs up to depth tried)")
-        search_exhausted = True
     except Exception as e:
         if debug:
             print(f"Unexpected error during search: {e}")
@@ -149,7 +168,7 @@ def solve_task(
         print(f"Search completed in {elapsed_time:.2f} seconds")
         if not found_solution:
             if search_exhausted:
-                print("No solution found: Search space exhausted")
+                print(f"No solution found: Search space exhausted (all programs up to depth {depth} tried)")
             elif search_timed_out:
                 print(f"No solution found: Search timed out after {timeout} seconds")
             else:

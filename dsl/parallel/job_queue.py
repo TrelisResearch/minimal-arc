@@ -91,7 +91,19 @@ def worker_process(
             
             # Generate and verify programs
             try:
-                for program in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout):
+                for result in iter_deepening(ALL_PRIMITIVES, depth, input_shape, output_shape, timeout):
+                    program, metadata = result
+                    
+                    # Check if this is a status update rather than a program
+                    if program is None:
+                        search_exhausted = metadata.get("search_exhausted", False)
+                        search_timed_out = metadata.get("search_timed_out", False)
+                        if search_exhausted and debug:
+                            print(f"Task {task_id}: Search space exhausted (all programs up to depth {depth} tried)")
+                        if search_timed_out and debug:
+                            print(f"Task {task_id}: Search timed out after {timeout} seconds")
+                        break
+                    
                     # Check if we've exceeded the timeout
                     current_time = time.time()
                     if current_time > end_time:
@@ -119,10 +131,8 @@ def worker_process(
                 if debug:
                     print(f"Task {task_id}: Search timed out after {timeout} seconds")
             except StopIteration:
-                # This means the search space was exhausted
-                search_exhausted = True
-                if debug:
-                    print(f"Task {task_id}: Search space exhausted (all programs up to depth tried)")
+                # End of iterator
+                pass
             except Exception as e:
                 if debug:
                     print(f"Task {task_id}: Unexpected error during search: {e}")
@@ -130,7 +140,7 @@ def worker_process(
             # If no prediction was generated, report why
             if not found_solution and debug:
                 if search_exhausted:
-                    print(f"Task {task_id}: No prediction generated - Search space exhausted")
+                    print(f"Task {task_id}: No prediction generated - Search space exhausted (all programs up to depth tried)")
                 elif search_timed_out:
                     print(f"Task {task_id}: No prediction generated - Search timed out after {timeout} seconds")
                 else:
