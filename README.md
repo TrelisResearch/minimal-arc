@@ -4,7 +4,7 @@ A repository for working with the Abstraction and Reasoning Corpus (ARC) dataset
 
 Apply to join the Trelis ARC AGI 2 Team [here](https://trelis.com/arc-agi-2/).
 
-Check out Trelis' video explaining ARC [here - forthcoming].
+Check out Trelis' video explaining ARC [here](https://youtu.be/GbCgyY1laDU).
 
 ## Very Basic Examples
 
