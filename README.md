@@ -13,6 +13,8 @@ If you're new to ARC AGI, read through these very simple examples:
 - [Neural Net Approach = train on examples](https://chatgpt.com/share/6810cc68-cf38-8003-aace-3630952bbeb6)
 - [LLM guided program search = write python solvers using LLMs](https://chatgpt.com/share/6810cc4c-e790-8003-8aac-b6f8ab2213e8)
 
+Then, move to the comprehensive examples in the `dsl`, `llmgs` and `ttt` folders.
+
 ## Scripts
 
 ### clean_arc_data.py
