@@ -10,6 +10,9 @@ The Greenblatt approach works as follows:
 2. **Filtering**: Test each program against training examples and filter out invalid ones
 3. **Majority Voting**: Run all valid programs on the test input and take the majority vote as the final output
 
+>![TIP]
+>See [Ryan Greenblatt's blog](https://redwoodresearch.substack.com/p/getting-50-sota-on-arc-agi-with-gpt) for further tricks to improve performance.
+
 ## Project Structure Explanation
 
 - `core/`: Contains the core functionality for program generation and evaluation
