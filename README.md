@@ -9,7 +9,7 @@ Check out Trelis' video explaining ARC [here](https://youtu.be/GbCgyY1laDU).
 ## Very Basic Examples
 
 If you're new to ARC AGI, read through these very simple examples:
-- [Domain Specific Language Approach = combine basic operations](https://chatgpt.com/share/6810cc59-c2c0-8003-ad6e-3c025c10224e)
+- [Domain Specific Language Approach = combine basic operations](https://chatgpt.com/share/68191c05-fd1c-8003-ab24-8c157a3af550)
 - [Neural Net Approach = train on examples](https://chatgpt.com/share/6810cc68-cf38-8003-aace-3630952bbeb6)
 - [LLM guided program search = write python solvers using LLMs](https://chatgpt.com/share/6810cc4c-e790-8003-8aac-b6f8ab2213e8)
 
